@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    /* Qual versão do JavaScript o TypeScript vai gerar.
+       ES2022 é seguro para Node 18+. */
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    /* Node ainda usa require/module.exports por baixo. */
+    "module": "commonjs",
+    "moduleResolution": "node",
+
+    /* Onde está o código-fonte e onde o JS compilado vai parar. */
+    "rootDir": "./src",
+    "outDir": "./dist",
+
+    /* ---------------------------------------------------------------
+       O bloco que realmente importa. "strict" liga um conjunto de
+       checagens que impedem os bugs mais comuns -- principalmente
+       strictNullChecks, que força você a tratar valores que podem ser
+       undefined. Como req.query.latitude PODE ser undefined, é isso
+       que vai te obrigar a validar a entrada antes de usar.
+       Não desligue. Ele é o motivo de você estar usando TypeScript.
+       --------------------------------------------------------------- */
+    "strict": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Permite `import express from 'express'` em vez de
+       `import * as express from 'express'`. */
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* Não checa os tipos dentro de node_modules. Acelera muito o build. */
+    "skipLibCheck": true,
+
+    /* Gera .js.map -- o stack trace de erro aponta pro .ts, não pro .js. */
+    "sourceMap": true,
+
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
