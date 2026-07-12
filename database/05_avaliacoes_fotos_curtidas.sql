@@ -119,10 +119,21 @@ COMMENT ON TABLE avaliacoes_profissional_curtidas IS
 --  que curtir), o array de fotos (LEFT JOIN LATERAL + array_agg, em vez de
 --  uma coluna só) e o total de curtidas.
 --
---  `CREATE OR REPLACE VIEW` -- não precisa dropar a antiga, só redefinir.
+--  `DROP VIEW` + `CREATE VIEW` (NÃO `CREATE OR REPLACE VIEW`) de propósito:
+--  o Postgres só deixa `CREATE OR REPLACE VIEW` ADICIONAR coluna no FINAL da
+--  lista -- ele recusa com erro (`cannot change name of view column`) se a
+--  nova definição renomeia ou reordena qualquer coluna que já existia. Como
+--  `avaliacao_id` entra NO MEIO (depois de `id_servico`, antes de
+--  `cliente_id`) e `url_foto_servico` vira `urls_fotos`, isso conta como
+--  mudança de nome/posição -- `CREATE OR REPLACE` não aceita. `DROP` +
+--  `CREATE` resolve, e não tem problema de permissão/dependência aqui
+--  porque nada mais no banco depende diretamente da view (só o backend, via
+--  SELECT).
 -- ============================================================================
 
-CREATE OR REPLACE VIEW vw_historico_portifolio AS
+DROP VIEW IF EXISTS vw_historico_portifolio;
+
+CREATE VIEW vw_historico_portifolio AS
 SELECT
     s.profissional_id,
     s.id_servico,
