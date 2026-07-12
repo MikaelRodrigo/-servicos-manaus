@@ -320,11 +320,15 @@ class _EstrelaMedia extends StatelessWidget {
   }
 }
 
-/// Card do "histórico de portfólio" -- estilo Shopee: galeria de fotos
-/// deslizável (quando a avaliação tem mais de uma) + botão "Útil" para
-/// curtir. É `StatefulWidget` (não `StatelessWidget` como antes) porque
-/// precisa guardar localmente se A PRÓPRIA PESSOA já curtiu e o total
-/// atual, atualizando na hora sem recarregar o portfólio inteiro.
+/// Card do "histórico de portfólio", no padrão de avaliação da Shopee:
+/// avatar + nome do cliente + "Útil" na mesma linha do topo, estrelas logo
+/// abaixo do nome, comentário como texto corrido, e miniaturas QUADRADAS
+/// das fotos (não um banner full-width) -- toque numa miniatura abre a
+/// foto em tela cheia, deslizável.
+///
+/// É `StatefulWidget` (não `StatelessWidget`) porque precisa guardar
+/// localmente se A PRÓPRIA PESSOA já curtiu e o total atual, atualizando na
+/// hora sem recarregar o portfólio inteiro.
 class _CartaoPortfolio extends StatefulWidget {
   final ItemPortfolio item;
 
@@ -372,101 +376,220 @@ class _CartaoPortfolioState extends State<_CartaoPortfolio> {
     }
   }
 
+  void _abrirFoto(int indiceInicial) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _VisualizadorDeFotos(
+          urls: widget.item.urlsFotos,
+          indiceInicial: indiceInicial,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
     final corDestaque = Theme.of(context).colorScheme.primary;
+    final inicial = item.nomeCliente.trim().isNotEmpty ? item.nomeCliente.trim()[0].toUpperCase() : '?';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      clipBehavior: Clip.antiAlias,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (item.urlsFotos.isNotEmpty) _GaleriaDeFotos(urls: item.urlsFotos),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Linha 1: avatar (iniciais -- não temos foto de cliente) + nome
+          // + data à esquerda, botão "Útil" à direita. Mesma posição da
+          // Shopee: avatar/usuário e "Útil" na mesma altura, no topo.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                child: Text(
+                  inicial,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       item.nomeCliente,
-                      style: Theme.of(context).textTheme.titleSmall,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    Row(
-                      children: [
-                        const Icon(Icons.star, size: 16, color: Colors.amber),
-                        const SizedBox(width: 2),
-                        Text(item.mediaEstrelas.toStringAsFixed(1)),
-                      ],
+                    const SizedBox(height: 2),
+                    Text(
+                      '${item.dataConclusao.day.toString().padLeft(2, '0')}/'
+                      '${item.dataConclusao.month.toString().padLeft(2, '0')}/'
+                      '${item.dataConclusao.year}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${item.dataConclusao.day.toString().padLeft(2, '0')}/'
-                  '${item.dataConclusao.month.toString().padLeft(2, '0')}/'
-                  '${item.dataConclusao.year}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                if (item.comentario != null && item.comentario!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(item.comentario!),
-                ],
-                const SizedBox(height: 8),
-                InkWell(
-                  onTap: _enviandoCurtida ? null : _alternarCurtida,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _curtido ? Icons.thumb_up : Icons.thumb_up_outlined,
-                          size: 18,
+              ),
+              InkWell(
+                onTap: _enviandoCurtida ? null : _alternarCurtida,
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _curtido ? Icons.thumb_up : Icons.thumb_up_outlined,
+                        size: 15,
+                        color: _curtido ? corDestaque : Colors.grey.shade500,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _totalCurtidas > 0 ? 'Útil ($_totalCurtidas)' : 'Útil',
+                        style: TextStyle(
+                          fontSize: 12,
                           color: _curtido ? corDestaque : Colors.grey.shade600,
+                          fontWeight: _curtido ? FontWeight.w600 : FontWeight.normal,
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _totalCurtidas > 0 ? 'Útil ($_totalCurtidas)' : 'Útil',
-                          style: TextStyle(
-                            color: _curtido ? corDestaque : Colors.grey.shade600,
-                            fontWeight: _curtido ? FontWeight.bold : FontWeight.normal,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+
+          // Linha 2: estrelas -- cinco ícones, não um número. Alinhadas na
+          // margem esquerda do card (não indentadas sob o avatar), igual à
+          // referência.
+          const SizedBox(height: 8),
+          _LinhaDeEstrelas(valor: item.mediaEstrelas),
+
+          // Linha 3: comentário, texto corrido.
+          if (item.comentario != null && item.comentario!.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(item.comentario!, style: Theme.of(context).textTheme.bodyMedium),
+          ],
+
+          // Linha 4: miniaturas quadradas das fotos, roláveis na horizontal.
+          if (item.urlsFotos.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _MiniaturasDeFotos(urls: item.urlsFotos, aoTocar: _abrirFoto),
+          ],
+
+          const SizedBox(height: 14),
+          Divider(height: 1, color: Colors.grey.shade200),
         ],
       ),
     );
   }
 }
 
-/// Galeria de fotos de uma avaliação -- desliza horizontalmente (`PageView`)
-/// com bolinhas indicando a posição atual, igual à galeria de fotos de uma
-/// avaliação no Shopee/Mercado Livre. Com uma foto só, os indicadores nem
-/// aparecem (não faz sentido mostrar bolinha pra uma foto só).
-class _GaleriaDeFotos extends StatefulWidget {
-  final List<String> urls;
+/// Cinco ícones de estrela (não um número) representando a média,
+/// arredondada para o inteiro mais próximo -- é assim que a Shopee mostra
+/// a nota de cada avaliação individual.
+class _LinhaDeEstrelas extends StatelessWidget {
+  final double valor;
+  final double tamanho;
 
-  const _GaleriaDeFotos({required this.urls});
+  const _LinhaDeEstrelas({required this.valor, this.tamanho = 15});
 
   @override
-  State<_GaleriaDeFotos> createState() => _GaleriaDeFotosState();
+  Widget build(BuildContext context) {
+    final preenchidas = valor.round().clamp(0, 5);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (indice) {
+        return Icon(
+          indice < preenchidas ? Icons.star : Icons.star_border,
+          size: tamanho,
+          color: Colors.amber,
+        );
+      }),
+    );
+  }
 }
 
-class _GaleriaDeFotosState extends State<_GaleriaDeFotos> {
-  final _controlador = PageController();
-  int _pagina = 0;
+/// Fileira horizontal de miniaturas QUADRADAS (96x96) das fotos de uma
+/// avaliação -- o tamanho pequeno é de propósito, seguindo o padrão da
+/// Shopee: a foto grande só aparece quando a pessoa toca numa miniatura
+/// (ver `_VisualizadorDeFotos`).
+class _MiniaturasDeFotos extends StatelessWidget {
+  final List<String> urls;
+  final ValueChanged<int> aoTocar;
+
+  const _MiniaturasDeFotos({required this.urls, required this.aoTocar});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 96,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: urls.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, indice) {
+          final urlFoto = ApiConfig.urlAbsoluta(urls[indice]);
+          return InkWell(
+            onTap: () => aoTocar(indice),
+            borderRadius: BorderRadius.circular(8),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: urlFoto != null
+                  ? Image.network(
+                      urlFoto,
+                      width: 96,
+                      height: 96,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 96,
+                        height: 96,
+                        color: Colors.grey.shade200,
+                        child: const Icon(Icons.broken_image, color: Colors.grey),
+                      ),
+                    )
+                  : Container(width: 96, height: 96, color: Colors.grey.shade200),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Tela cheia, fundo preto, para ver uma foto do portfólio em tamanho
+/// grande -- abre já na foto que a pessoa tocou (`indiceInicial`) e deixa
+/// deslizar (`PageView`) para as outras fotos da mesma avaliação.
+/// `InteractiveViewer` permite dar zoom com pinça, como em qualquer
+/// visualizador de foto de app de compras.
+class _VisualizadorDeFotos extends StatefulWidget {
+  final List<String> urls;
+  final int indiceInicial;
+
+  const _VisualizadorDeFotos({required this.urls, required this.indiceInicial});
+
+  @override
+  State<_VisualizadorDeFotos> createState() => _VisualizadorDeFotosState();
+}
+
+class _VisualizadorDeFotosState extends State<_VisualizadorDeFotos> {
+  late final PageController _controlador;
+  late int _pagina;
+
+  @override
+  void initState() {
+    super.initState();
+    _pagina = widget.indiceInicial;
+    _controlador = PageController(initialPage: widget.indiceInicial);
+  }
 
   @override
   void dispose() {
@@ -476,50 +599,25 @@ class _GaleriaDeFotosState extends State<_GaleriaDeFotos> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.bottomCenter,
-      children: [
-        SizedBox(
-          height: 180,
-          width: double.infinity,
-          child: PageView.builder(
-            controller: _controlador,
-            itemCount: widget.urls.length,
-            onPageChanged: (indice) => setState(() => _pagina = indice),
-            itemBuilder: (context, indice) {
-              final urlFoto = ApiConfig.urlAbsoluta(widget.urls[indice]);
-              if (urlFoto == null) return const SizedBox.shrink();
-              return Image.network(
-                urlFoto,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Colors.grey.shade200,
-                  child: const Icon(Icons.broken_image, color: Colors.grey),
-                ),
-              );
-            },
-          ),
-        ),
-        if (widget.urls.length > 1)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(widget.urls.length, (indice) {
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: indice == _pagina ? Colors.white : Colors.white54,
-                  ),
-                );
-              }),
-            ),
-          ),
-      ],
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text('${_pagina + 1} / ${widget.urls.length}'),
+      ),
+      body: PageView.builder(
+        controller: _controlador,
+        itemCount: widget.urls.length,
+        onPageChanged: (indice) => setState(() => _pagina = indice),
+        itemBuilder: (context, indice) {
+          final urlFoto = ApiConfig.urlAbsoluta(widget.urls[indice]);
+          if (urlFoto == null) return const SizedBox.shrink();
+          return InteractiveViewer(
+            child: Center(child: Image.network(urlFoto, fit: BoxFit.contain)),
+          );
+        },
+      ),
     );
   }
 }
