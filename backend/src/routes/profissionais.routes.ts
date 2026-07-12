@@ -11,7 +11,7 @@ import {
   ErroDeValidacao,
 } from '../utils/validacao';
 import { buscarPortifolio, buscarResumoDeAvaliacoes } from '../repositories/avaliacoes.repository';
-import { exigirAutenticacao, exigirPapel } from '../middlewares/autenticacao';
+import { exigirAutenticacao, exigirPapel, autenticacaoOpcional } from '../middlewares/autenticacao';
 import { uploadFotoPerfil, urlPublicaDoArquivoPerfil } from '../middlewares/upload';
 
 export const profissionaisRouter = Router();
@@ -196,10 +196,16 @@ profissionaisRouter.get(
    propósito -- é o que convence um cliente novo a contratar, ele precisa
    ver isso ANTES de criar conta.
 
+   `autenticacaoOpcional` (não `exigirAutenticacao`): a rota continua
+   funcionando sem login, mas quando a pessoa ESTÁ logada, `req.usuario`
+   fica preenchido e usamos o ID dela para marcar quais avaliações ela já
+   curtiu (`curtido_por_mim` -- ver botão "Útil" em curtidas.routes.ts).
+
    Query params: pagina (padrão 1), limite (padrão 20, máximo 100)
    ========================================================================= */
 profissionaisRouter.get(
   '/:id/portfolio',
+  autenticacaoOpcional,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const profissionalId = uuidObrigatorio(req.params.id, 'id');
@@ -207,7 +213,11 @@ profissionaisRouter.get(
       const limite = entre(numeroOpcional(req.query.limite, 'limite', 20), 1, 100, 'limite');
       const offset = (pagina - 1) * limite;
 
-      const portfolio = await buscarPortifolio(profissionalId, { limite, offset });
+      const portfolio = await buscarPortifolio(
+        profissionalId,
+        { limite, offset },
+        req.usuario?.sub,
+      );
 
       return res.json({ pagina, limite, total_retornado: portfolio.length, dados: portfolio });
     } catch (erro) {

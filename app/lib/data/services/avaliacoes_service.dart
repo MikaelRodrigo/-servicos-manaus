@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'api_client.dart';
 
@@ -8,21 +9,30 @@ class AvaliacoesService {
 
   final _api = ApiClient.instancia;
 
-  /// O CLIENTE avalia o PROFISSIONAL. `foto` é opcional -- por isso sempre
-  /// mandamos como multipart/form-data (via `postMultipart`), com ou sem
-  /// arquivo anexado. O backend (multer) lida com os dois casos igual.
+  /// O CLIENTE avalia o PROFISSIONAL. `fotos` é opcional (pode vir vazia) e
+  /// aceita ATÉ 5 imagens -- por isso sempre mandamos como multipart/
+  /// form-data (via `postMultipart`), com ou sem arquivos anexados. O
+  /// backend (multer, `.array('fotos_servico', 5)`) lida com os dois casos
+  /// igual.
   ///
-  /// `foto` é um `XFile` (do image_picker), não um `dart:io File` -- é o
-  /// tipo que funciona igual em mobile, desktop E web. `readAsBytes()`
-  /// nele funciona nas três plataformas.
+  /// `fotos` é uma lista de `XFile` (do image_picker), não `dart:io File`
+  /// -- é o tipo que funciona igual em mobile, desktop E web.
+  /// `readAsBytes()` nele funciona nas três plataformas.
   Future<Map<String, dynamic>> avaliarProfissional({
     required String idServico,
     required int estrelasTecnico,
     required int estrelasComportamental,
     required int estrelasEconomico,
     String? comentario,
-    XFile? foto,
+    List<XFile> fotos = const [],
   }) async {
+    final bytesDasFotos = <Uint8List>[];
+    final nomesDasFotos = <String>[];
+    for (final foto in fotos) {
+      bytesDasFotos.add(await foto.readAsBytes());
+      nomesDasFotos.add(foto.name);
+    }
+
     final resposta = await _api.postMultipart(
       '/servicos/$idServico/avaliacoes/profissional',
       campos: {
@@ -31,8 +41,8 @@ class AvaliacoesService {
         'estrelas_economico': '$estrelasEconomico',
         if (comentario != null && comentario.isNotEmpty) 'comentario': comentario,
       },
-      bytesArquivo: foto != null ? await foto.readAsBytes() : null,
-      nomeArquivo: foto?.name,
+      arquivos: bytesDasFotos,
+      nomesArquivos: nomesDasFotos,
     );
     return resposta as Map<String, dynamic>;
   }

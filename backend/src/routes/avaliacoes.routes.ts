@@ -8,7 +8,7 @@ import {
 } from '../utils/validacao';
 import { ehErroDePostgres, PG_UNIQUE_VIOLATION, PG_CHECK_VIOLATION } from '../utils/erros-postgres';
 import { ErroDeAutenticacao } from '../middlewares/autenticacao';
-import { uploadFotoServico, urlPublicaDoArquivo } from '../middlewares/upload';
+import { uploadFotoServico, urlsPublicasDosArquivos } from '../middlewares/upload';
 import { buscarServicoPorId } from '../repositories/servicos.repository';
 import {
   criarAvaliacaoProfissional,
@@ -41,11 +41,12 @@ async function buscarServicoOuFalhar(req: Request) {
 
 /* ============================================================================
    POST /servicos/:id/avaliacoes/profissional
-   (o CLIENTE avalia o PROFISSIONAL -- com foto opcional)
+   (o CLIENTE avalia o PROFISSIONAL -- com fotos opcionais, até 5)
 
    Content-Type: multipart/form-data
    Campos: estrelas_tecnico, estrelas_comportamental, estrelas_economico,
-           comentario (opcional), foto_servico (arquivo, opcional)
+           comentario (opcional), fotos_servico (0 a 5 arquivos, campo
+           repetido -- ver MAX_FOTOS_POR_AVALIACAO em upload.ts)
 
    `exigirPapel('cliente')` não foi colocado aqui de propósito -- ele
    sozinho não bastaria (um cliente qualquer, não o DESTE serviço, também
@@ -78,7 +79,13 @@ avaliacoesRouter.post(
       );
       const estrelasEconomico = notaObrigatoria(req.body.estrelas_economico, 'estrelas_economico');
       const comentario = textoOpcional(req.body.comentario, 'comentario', 2000);
-      const urlFotoServico = req.file ? urlPublicaDoArquivo(req.file) : undefined;
+
+      // `.array(...)` (ver upload.ts) preenche `req.files` como ARRAY, não
+      // `req.file` como o antigo `.single(...)`. Sem nenhuma foto enviada,
+      // `req.files` chega como array vazio -- por isso o `?? []` não é nem
+      // necessário aqui, mas o cast garante o tipo certo pro TypeScript.
+      const arquivos = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const urlsFotos = urlsPublicasDosArquivos(arquivos);
 
       let avaliacao;
       try {
@@ -90,7 +97,7 @@ avaliacoesRouter.post(
           estrelasComportamental,
           estrelasEconomico,
           comentario,
-          urlFotoServico,
+          urlsFotos,
         });
       } catch (erro) {
         if (ehErroDePostgres(erro) && erro.code === PG_UNIQUE_VIOLATION) {

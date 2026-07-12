@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+// `hide Path`: o pacote latlong2 também exporta uma classe chamada `Path`
+// (usada para rotas geográficas), que colide com `dart:ui`'s `Path` --
+// exatamente o que `CustomPainter.paint` precisa para desenhar o triângulo
+// do marcador (`Path()..moveTo(...)..lineTo(...)`). Sem o `hide`, o Dart
+// resolve `Path()` para a classe errada e o app não compila.
+import 'package:latlong2/latlong.dart' hide Path;
 import 'package:provider/provider.dart';
+import '../core/config/api_config.dart';
 import '../data/models/profissional.dart';
 import '../data/models/usuario.dart';
 import '../providers/auth_provider.dart';
@@ -100,11 +106,16 @@ class _MapaScreenState extends State<MapaScreen> {
       ...profissionais.resultados.map(
         (p) => Marker(
           point: LatLng(p.latitude, p.longitude),
-          width: 42,
-          height: 42,
+          width: 48,
+          height: 56,
+          // O `alignment` desloca o marcador pra cima: o ponto (latitude,
+          // longitude) precisa cair na PONTA do pino (embaixo), não no
+          // centro do círculo da foto -- senão o profissional parece estar
+          // um pouco acima de onde ele realmente está.
+          alignment: Alignment.topCenter,
           child: GestureDetector(
             onTap: () => _abrirPerfilProfissional(p),
-            child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 42),
+            child: _MarcadorProfissional(profissional: p),
           ),
         ),
       ),
@@ -209,6 +220,96 @@ class _MapaScreenState extends State<MapaScreen> {
       ),
     );
   }
+}
+
+/// Marcador de profissional no mapa: a foto de perfil dele dentro de um
+/// círculo com borda branca, com um "raboinho" (triângulo) apontando pro
+/// ponto exato da localização -- o mesmo efeito visual de apps como Uber/
+/// iFood, só que com a cara de quem está prestando o serviço em vez de um
+/// pino genérico.
+///
+/// Quando o profissional ainda não tem `url_foto_perfil` (não editou o
+/// perfil ainda -- ver EditarPerfilScreen) ou a imagem falha ao carregar,
+/// cai num ícone de pessoa sobre fundo vermelho, mantendo a mesma "cara" de
+/// pino que o app tinha antes.
+class _MarcadorProfissional extends StatelessWidget {
+  final Profissional profissional;
+
+  const _MarcadorProfissional({required this.profissional});
+
+  @override
+  Widget build(BuildContext context) {
+    final urlFoto = ApiConfig.urlAbsoluta(profissional.urlFotoPerfil);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 2.5)),
+            boxShadow: [
+              BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 1)),
+            ],
+          ),
+          child: ClipOval(
+            child: urlFoto != null
+                ? Image.network(
+                    urlFoto,
+                    fit: BoxFit.cover,
+                    // Se a URL existir mas a imagem falhar ao carregar (arquivo
+                    // apagado, rede lenta etc.), cai no mesmo fallback de quem
+                    // nunca teve foto -- nunca mostra um ícone de "imagem quebrada".
+                    errorBuilder: (_, __, ___) => _IconeFallback(profissional: profissional),
+                  )
+                : _IconeFallback(profissional: profissional),
+          ),
+        ),
+        // O "raboinho" do pino -- um triângulo simples apontando para baixo,
+        // exatamente sob o centro do círculo, encostado nele (sem espaço).
+        CustomPaint(
+          size: const Size(12, 7),
+          painter: _TrianguloPainter(),
+        ),
+      ],
+    );
+  }
+}
+
+class _IconeFallback extends StatelessWidget {
+  final Profissional profissional;
+
+  const _IconeFallback({required this.profissional});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.redAccent,
+      alignment: Alignment.center,
+      child: const Icon(Icons.person, color: Colors.white, size: 26),
+    );
+  }
+}
+
+/// Desenha o triângulo do "raboinho" do pino. `moveTo`/`lineTo` formam um
+/// triângulo isósceles: base no topo (largura toda), ponta embaixo no meio
+/// -- é o que dá a impressão de "pino apontando para o chão".
+class _TrianguloPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final tinta = Paint()..color = Colors.white;
+    final caminho = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(caminho, tinta);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrianguloPainter oldDelegate) => false;
 }
 
 class _AvisoFaixa extends StatelessWidget {

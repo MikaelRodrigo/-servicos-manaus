@@ -43,17 +43,23 @@ const armazenamento = multer.diskStorage({
 
 const TIPOS_DE_IMAGEM_ACEITOS = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+/** Teto de fotos por avaliação. Ajuste aqui se um dia precisar de mais. */
+export const MAX_FOTOS_POR_AVALIACAO = 5;
+
 /**
  * Middleware pronto para usar numa rota: `router.post('/x', uploadFotoServico, handler)`.
  *
- * Espera um campo de formulário chamado EXATAMENTE "foto_servico"
- * (multipart/form-data). Se o campo não vier, `req.file` fica `undefined`
- * -- a foto é OPCIONAL, a rota decide o que fazer com isso.
+ * Espera um campo de formulário chamado EXATAMENTE "fotos_servico"
+ * (multipart/form-data), podendo repetir esse campo várias vezes (é assim
+ * que multipart representa "vários arquivos no mesmo campo"). `.array(...)`
+ * -- não `.single(...)` -- porque agora uma avaliação pode ter várias fotos
+ * (ver migração 05: `avaliacoes_profissional_fotos`). Se nenhum arquivo vier,
+ * `req.files` chega como array vazio -- a foto continua sendo OPCIONAL.
  */
 export const uploadFotoServico = multer({
   storage: armazenamento,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5 MB. Ajuste aqui se precisar de mais.
+    fileSize: 5 * 1024 * 1024, // 5 MB por arquivo. Ajuste aqui se precisar de mais.
   },
   fileFilter: (_req, file, callback) => {
     if (!TIPOS_DE_IMAGEM_ACEITOS.has(file.mimetype)) {
@@ -63,7 +69,7 @@ export const uploadFotoServico = multer({
     }
     callback(null, true);
   },
-}).single('foto_servico');
+}).array('fotos_servico', MAX_FOTOS_POR_AVALIACAO);
 
 /* ============================================================================
    FOTO DE PERFIL do profissional (PATCH /profissionais/me)
@@ -120,6 +126,8 @@ export function ehErroDeUpload(erro: unknown): erro is multer.MulterError {
 const MENSAGENS_DE_ERRO_MULTER: Partial<Record<string, string>> = {
   LIMIT_FILE_SIZE: 'A imagem excede o tamanho máximo permitido (5 MB).',
   LIMIT_UNEXPECTED_FILE: 'Campo de arquivo inesperado.',
+  LIMIT_FILE_COUNT: `Envie no máximo ${MAX_FOTOS_POR_AVALIACAO} fotos.`,
+  LIMIT_FIELD_COUNT: `Envie no máximo ${MAX_FOTOS_POR_AVALIACAO} fotos.`,
 };
 
 export function mensagemDeErroUpload(erro: multer.MulterError): string {
@@ -129,6 +137,11 @@ export function mensagemDeErroUpload(erro: multer.MulterError): string {
 /** Converte o arquivo salvo por multer numa URL relativa, pronta para gravar no banco. */
 export function urlPublicaDoArquivo(arquivo: Express.Multer.File): string {
   return `/uploads/avaliacoes/${arquivo.filename}`;
+}
+
+/** Mesma ideia, para VÁRIOS arquivos de uma vez (`req.files`, vindo do `.array(...)` acima). */
+export function urlsPublicasDosArquivos(arquivos: Express.Multer.File[]): string[] {
+  return arquivos.map(urlPublicaDoArquivo);
 }
 
 /** Mesma ideia de `urlPublicaDoArquivo`, mas para a pasta `uploads/perfis/`. */

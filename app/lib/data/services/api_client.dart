@@ -99,10 +99,11 @@ class ApiClient {
   }
 
   /// POST ou PATCH multipart/form-data -- usado em toda tela que manda
-  /// arquivo (avaliação com foto, edição de perfil com foto). Campos de
-  /// texto vão em `campos`; se `bytesArquivo` não for nulo, ele é anexado
-  /// com o nome de campo `nomeCampoArquivo` -- tem que bater EXATAMENTE com
-  /// o que o multer espera no backend (veja upload.ts, `.single('...')`).
+  /// arquivo (avaliação com fotos, edição de perfil com foto). Campos de
+  /// texto vão em `campos`; cada item de `arquivos` é anexado com o MESMO
+  /// nome de campo `nomeCampoArquivo` -- é assim que multipart representa
+  /// "vários arquivos no mesmo campo", e tem que bater EXATAMENTE com o que
+  /// o multer espera no backend (veja upload.ts, `.array('...')`/`.single('...')`).
   ///
   /// Recebe BYTES (`Uint8List`), não um `dart:io File`, de propósito: a
   /// classe `File` do `dart:io` simplesmente NÃO EXISTE quando o app roda
@@ -115,8 +116,8 @@ class ApiClient {
     String caminho, {
     required Map<String, String> campos,
     required String nomeCampoArquivo,
-    Uint8List? bytesArquivo,
-    String? nomeArquivo,
+    List<Uint8List> arquivos = const [],
+    List<String> nomesArquivos = const [],
   }) async {
     final requisicao = http.MultipartRequest(metodo, _uri(caminho));
 
@@ -127,12 +128,12 @@ class ApiClient {
 
     requisicao.fields.addAll(campos);
 
-    if (bytesArquivo != null) {
-      final nome = nomeArquivo ?? 'foto.jpg';
+    for (var i = 0; i < arquivos.length; i++) {
+      final nome = i < nomesArquivos.length ? nomesArquivos[i] : 'foto_$i.jpg';
       requisicao.files.add(
         http.MultipartFile.fromBytes(
           nomeCampoArquivo,
-          bytesArquivo,
+          arquivos[i],
           filename: nome,
           contentType: _tipoDeConteudoPorExtensao(nome),
         ),
@@ -144,27 +145,28 @@ class ApiClient {
     return _tratarResposta(resposta);
   }
 
-  /// POST multipart -- usado na avaliação com foto
-  /// (POST /servicos/:id/avaliacoes/profissional, campo "foto_servico").
+  /// POST multipart -- usado na avaliação com fotos (até 5)
+  /// (POST /servicos/:id/avaliacoes/profissional, campo "fotos_servico").
   Future<dynamic> postMultipart(
     String caminho, {
     required Map<String, String> campos,
-    Uint8List? bytesArquivo,
-    String? nomeArquivo,
+    List<Uint8List> arquivos = const [],
+    List<String> nomesArquivos = const [],
   }) {
     return _enviarMultipart(
       'POST',
       caminho,
       campos: campos,
-      nomeCampoArquivo: 'foto_servico',
-      bytesArquivo: bytesArquivo,
-      nomeArquivo: nomeArquivo,
+      nomeCampoArquivo: 'fotos_servico',
+      arquivos: arquivos,
+      nomesArquivos: nomesArquivos,
     );
   }
 
   /// PATCH multipart -- usado na edição de perfil do profissional
   /// (PATCH /profissionais/me, campo "foto_perfil"). PATCH porque estamos
-  /// atualizando um recurso que já existe, não criando um novo.
+  /// atualizando um recurso que já existe, não criando um novo. Continua
+  /// sendo UMA foto só -- perfil não tem galeria.
   Future<dynamic> patchMultipart(
     String caminho, {
     required Map<String, String> campos,
@@ -176,8 +178,8 @@ class ApiClient {
       caminho,
       campos: campos,
       nomeCampoArquivo: 'foto_perfil',
-      bytesArquivo: bytesArquivo,
-      nomeArquivo: nomeArquivo,
+      arquivos: bytesArquivo != null ? [bytesArquivo] : const [],
+      nomesArquivos: nomeArquivo != null ? [nomeArquivo] : const [],
     );
   }
 

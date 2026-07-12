@@ -320,14 +320,62 @@ class _EstrelaMedia extends StatelessWidget {
   }
 }
 
-class _CartaoPortfolio extends StatelessWidget {
+/// Card do "histórico de portfólio" -- estilo Shopee: galeria de fotos
+/// deslizável (quando a avaliação tem mais de uma) + botão "Útil" para
+/// curtir. É `StatefulWidget` (não `StatelessWidget` como antes) porque
+/// precisa guardar localmente se A PRÓPRIA PESSOA já curtiu e o total
+/// atual, atualizando na hora sem recarregar o portfólio inteiro.
+class _CartaoPortfolio extends StatefulWidget {
   final ItemPortfolio item;
 
   const _CartaoPortfolio({required this.item});
 
   @override
+  State<_CartaoPortfolio> createState() => _CartaoPortfolioState();
+}
+
+class _CartaoPortfolioState extends State<_CartaoPortfolio> {
+  late bool _curtido;
+  late int _totalCurtidas;
+  bool _enviandoCurtida = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _curtido = widget.item.curtidoPorMim;
+    _totalCurtidas = widget.item.totalCurtidas;
+  }
+
+  Future<void> _alternarCurtida() async {
+    final logado = context.read<AuthProvider>().usuario != null;
+    if (!logado) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Entre na sua conta para curtir uma avaliação.')),
+      );
+      return;
+    }
+
+    setState(() => _enviandoCurtida = true);
+    try {
+      final resultado = await ProfissionaisService.instancia.curtirAvaliacao(widget.item.avaliacaoId);
+      if (!mounted) return;
+      setState(() {
+        _curtido = resultado.curtido;
+        _totalCurtidas = resultado.totalCurtidas;
+      });
+    } on ApiException catch (erro) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));
+      }
+    } finally {
+      if (mounted) setState(() => _enviandoCurtida = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final urlFoto = ApiConfig.urlAbsoluta(item.urlFotoServico);
+    final item = widget.item;
+    final corDestaque = Theme.of(context).colorScheme.primary;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -335,18 +383,7 @@ class _CartaoPortfolio extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (urlFoto != null)
-            Image.network(
-              urlFoto,
-              height: 180,
-              width: double.infinity,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                height: 180,
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.broken_image, color: Colors.grey),
-              ),
-            ),
+          if (item.urlsFotos.isNotEmpty) _GaleriaDeFotos(urls: item.urlsFotos),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -379,11 +416,110 @@ class _CartaoPortfolio extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(item.comentario!),
                 ],
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: _enviandoCurtida ? null : _alternarCurtida,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _curtido ? Icons.thumb_up : Icons.thumb_up_outlined,
+                          size: 18,
+                          color: _curtido ? corDestaque : Colors.grey.shade600,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _totalCurtidas > 0 ? 'Útil ($_totalCurtidas)' : 'Útil',
+                          style: TextStyle(
+                            color: _curtido ? corDestaque : Colors.grey.shade600,
+                            fontWeight: _curtido ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Galeria de fotos de uma avaliação -- desliza horizontalmente (`PageView`)
+/// com bolinhas indicando a posição atual, igual à galeria de fotos de uma
+/// avaliação no Shopee/Mercado Livre. Com uma foto só, os indicadores nem
+/// aparecem (não faz sentido mostrar bolinha pra uma foto só).
+class _GaleriaDeFotos extends StatefulWidget {
+  final List<String> urls;
+
+  const _GaleriaDeFotos({required this.urls});
+
+  @override
+  State<_GaleriaDeFotos> createState() => _GaleriaDeFotosState();
+}
+
+class _GaleriaDeFotosState extends State<_GaleriaDeFotos> {
+  final _controlador = PageController();
+  int _pagina = 0;
+
+  @override
+  void dispose() {
+    _controlador.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        SizedBox(
+          height: 180,
+          width: double.infinity,
+          child: PageView.builder(
+            controller: _controlador,
+            itemCount: widget.urls.length,
+            onPageChanged: (indice) => setState(() => _pagina = indice),
+            itemBuilder: (context, indice) {
+              final urlFoto = ApiConfig.urlAbsoluta(widget.urls[indice]);
+              if (urlFoto == null) return const SizedBox.shrink();
+              return Image.network(
+                urlFoto,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.grey.shade200,
+                  child: const Icon(Icons.broken_image, color: Colors.grey),
+                ),
+              );
+            },
+          ),
+        ),
+        if (widget.urls.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(widget.urls.length, (indice) {
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: indice == _pagina ? Colors.white : Colors.white54,
+                  ),
+                );
+              }),
+            ),
+          ),
+      ],
     );
   }
 }

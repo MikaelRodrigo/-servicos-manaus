@@ -75,42 +75,61 @@ class ResumoAvaliacoes {
 
 /// Espelha um item de GET /profissionais/:id/portfolio (view
 /// `vw_historico_portifolio` no backend) -- um serviço já concluído e
-/// avaliado por um cliente, com foto e comentário. É o "histórico de
+/// avaliado por um cliente, com fotos e comentário. É o "histórico de
 /// portfólio alimentado pelos clientes" que aparece no perfil público.
+///
+/// `avaliacaoId` (não `idServico`) é o identificador usado para curtir --
+/// ver `ProfissionaisService.curtirAvaliacao`. `urlsFotos` é sempre uma
+/// lista (nunca null): pode vir vazia quando o cliente não anexou foto
+/// nenhuma na avaliação.
 class ItemPortfolio {
   final String idServico;
+  final String avaliacaoId;
   final String nomeCliente;
   final String? comentario;
-  final String? urlFotoServico;
+  final List<String> urlsFotos;
   final int estrelasTecnico;
   final int estrelasComportamental;
   final int estrelasEconomico;
   final double mediaEstrelas;
+  final int totalCurtidas;
+  final bool curtidoPorMim;
   final DateTime dataConclusao;
+  final DateTime dataAvaliacao;
 
   const ItemPortfolio({
     required this.idServico,
+    required this.avaliacaoId,
     required this.nomeCliente,
     required this.comentario,
-    required this.urlFotoServico,
+    required this.urlsFotos,
     required this.estrelasTecnico,
     required this.estrelasComportamental,
     required this.estrelasEconomico,
     required this.mediaEstrelas,
+    required this.totalCurtidas,
+    required this.curtidoPorMim,
     required this.dataConclusao,
+    required this.dataAvaliacao,
   });
 
   factory ItemPortfolio.fromJson(Map<String, dynamic> json) {
     return ItemPortfolio(
       idServico: json['id_servico'] as String,
+      avaliacaoId: json['avaliacao_id'] as String,
       nomeCliente: json['nome_cliente'] as String,
       comentario: json['comentario'] as String?,
-      urlFotoServico: json['url_foto_servico'] as String?,
+      urlsFotos: (json['urls_fotos'] as List<dynamic>? ?? const [])
+          .map((item) => item as String)
+          .toList(),
       estrelasTecnico: json['estrelas_tecnico'] as int,
       estrelasComportamental: json['estrelas_comportamental'] as int,
       estrelasEconomico: json['estrelas_economico'] as int,
       mediaEstrelas: (json['media_estrelas'] as num).toDouble(),
+      totalCurtidas: json['total_curtidas'] as int,
+      curtidoPorMim: json['curtido_por_mim'] as bool,
       dataConclusao: DateTime.parse(json['data_conclusao'] as String),
+      dataAvaliacao: DateTime.parse(json['data_avaliacao'] as String),
     );
   }
 }

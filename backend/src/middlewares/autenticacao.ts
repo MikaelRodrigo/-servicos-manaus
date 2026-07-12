@@ -66,6 +66,38 @@ export function exigirAutenticacao(req: Request, _res: Response, next: NextFunct
 }
 
 /**
+ * Versão "sem exigência" de `exigirAutenticacao`, para rotas PÚBLICAS que
+ * ainda assim se comportam diferente para quem está logado.
+ *
+ * Caso de uso real: GET /profissionais/:id/portfolio é pública -- qualquer
+ * visitante vê, mesmo sem conta (é o que convence alguém a se cadastrar).
+ * Mas se a pessoa JÁ está logada, a rota quer saber quem ela é, pra marcar
+ * quais avaliações ela já curtiu (`curtido_por_mim`). Este middleware tenta
+ * ler o token; se vier um token válido, preenche `req.usuario` normalmente;
+ * se não vier token NENHUM, ou vier um token quebrado/expirado, a request
+ * segue em frente do mesmo jeito -- só que com `req.usuario` indefinido.
+ *
+ * A diferença para `exigirAutenticacao` é só essa: aqui, "sem token" ou
+ * "token inválido" NUNCA vira erro. A rota que usar isto precisa tratar
+ * `req.usuario` como opcional (`req.usuario?.sub`, não `req.usuario!.sub`).
+ */
+export function autenticacaoOpcional(req: Request, _res: Response, next: NextFunction): void {
+  const token = extrairTokenDoHeader(req);
+  if (!token) {
+    return next();
+  }
+
+  try {
+    req.usuario = verificarToken(token);
+  } catch {
+    // Token presente mas inválido/expirado -- ignora e segue como visitante
+    // anônimo, em vez de derrubar a request. É a diferença central para
+    // `exigirAutenticacao`, que lançaria 401 aqui.
+  }
+  next();
+}
+
+/**
  * Middleware de AUTORIZAÇÃO (diferente de autenticação!). Restringe uma rota
  * a um papel específico. Precisa rodar DEPOIS de `exigirAutenticacao`.
  *

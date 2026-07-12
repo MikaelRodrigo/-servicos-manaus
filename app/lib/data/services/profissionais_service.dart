@@ -55,9 +55,15 @@ class ProfissionaisService {
   }
 
   /// GET /profissionais/:id/portfolio -- histórico de serviços concluídos e
-  /// avaliados, com foto e comentário de cada cliente. Suporta paginação
+  /// avaliados, com fotos e comentário de cada cliente. Suporta paginação
   /// simples (o app carrega a primeira página; "carregar mais" fica para
   /// uma etapa futura caso o portfólio cresça muito).
+  ///
+  /// `comAutenticacao: true` (o padrão) de propósito, mesmo a rota sendo
+  /// pública: se a pessoa estiver logada, o token vai junto e o backend
+  /// (via `autenticacaoOpcional`) devolve `curtido_por_mim` correto para
+  /// ela. Sem login, o token simplesmente não existe e a rota funciona do
+  /// mesmo jeito -- só que com `curtido_por_mim` sempre `false`.
   Future<List<ItemPortfolio>> buscarPortfolio(
     String profissionalId, {
     int pagina = 1,
@@ -65,7 +71,6 @@ class ProfissionaisService {
   }) async {
     final resposta = await _api.get(
       '/profissionais/$profissionalId/portfolio',
-      comAutenticacao: false,
       query: {'pagina': pagina, 'limite': limite},
     );
 
@@ -73,6 +78,18 @@ class ProfissionaisService {
     return dados
         .map((item) => ItemPortfolio.fromJson(item as Map<String, dynamic>))
         .toList();
+  }
+
+  /// POST /avaliacoes/:avaliacaoId/curtir -- alterna a curtida ("Útil") de
+  /// uma avaliação do portfólio. Exige login (qualquer papel). Devolve o
+  /// novo estado pronto para atualizar o card sem recarregar a lista
+  /// inteira: `{curtido: true/false, totalCurtidas: N}`.
+  Future<({bool curtido, int totalCurtidas})> curtirAvaliacao(String avaliacaoId) async {
+    final resposta = await _api.post('/avaliacoes/$avaliacaoId/curtir') as Map<String, dynamic>;
+    return (
+      curtido: resposta['curtido'] as bool,
+      totalCurtidas: resposta['total_curtidas'] as int,
+    );
   }
 
   /// PATCH /profissionais/me -- o PRÓPRIO profissional logado edita seu

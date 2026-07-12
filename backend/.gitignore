@@ -6,3 +6,7 @@ dist/
 
 # Fotos enviadas por usuarios (armazenamento local em disco). Nunca comitar.
 uploads/
+.
+# Nunca comitar conteúdo de usuário; a pasta é recriada sozinha (fs.mkdirSync)
+# na primeira vez que o servidor sobe.
+uploads/
