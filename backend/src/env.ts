@@ -35,4 +35,6 @@ export const env = {
   },
 
   raioMaximoKm: numero('RAIO_MAXIMO_KM', 50),
-} as const;
+
+  jwt: {
+ 

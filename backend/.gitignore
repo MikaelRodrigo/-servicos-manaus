@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Fotos enviadas por usuarios (armazenamento local em disco). Nunca comitar.
+uploads/

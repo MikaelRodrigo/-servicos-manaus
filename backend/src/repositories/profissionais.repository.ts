@@ -29,6 +29,7 @@ export interface ProfissionalProximo {
   latitude: number;
   longitude: number;
   distancia_metros: number;
+  url_foto_perfil: string | null;
 }
 
 /**
@@ -67,6 +68,7 @@ export async function buscarProximos(
       p.contato,
       p.latitude,
       p.longitude,
+      p.url_foto_perfil,
 
       -- ROUND() devolve NUMERIC, que o driver 'pg' entregaria como string.
       -- O cast ::float8 garante um number no JSON.
@@ -121,6 +123,4 @@ export async function buscarProximos(
     filtro.offset, // $6
   ];
 
-  const { rows } = await pool.query<ProfissionalProximo>(sql, valores);
-  return rows;
-}
+  const { rows } = await pool.q

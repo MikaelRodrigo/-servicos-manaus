@@ -1,8 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import path from 'node:path';
 import { env } from './env';
 import { profissionaisRouter } from './routes/profissionais.routes';
-import { ErroDeValidacao } from './utils/validacao';
+import { authRouter } from './routes/auth.routes';
+import { servicosRouter } from './routes/servicos.routes';
+import { ErroDeValidacao, ErroDeConflito, ErroNaoEncontrado } from './utils/validacao';
+import { ErroDeAutenticacao } from './middlewares/autenticacao';
+import { ehErroDeUpload, mensagemDeErroUpload } from './middlewares/upload';
 
 export const app = express();
 
@@ -36,7 +41,15 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', ambiente: env.nodeEnv, timestamp: new Date().toISOString() });
 });
 
+// Serve os arquivos de uploads/avaliacoes/ como arquivo estático, na URL
+// /uploads/avaliacoes/<nome>. É essa URL que vai parar em `url_foto_servico`.
+// Lembrete da Etapa "Avaliações": isto é armazenamento em DISCO LOCAL,
+// bom para aprender, mas não sobrevive a um deploy num container efêmero.
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+
 app.use('/profissionais', profissionaisRouter);
+app.use('/auth', authRouter);
+app.use('/servicos', servicosRouter);
 
 /* ---------------------------------------------------------------------------
    404 - qualquer rota não registrada acima cai aqui.
@@ -51,22 +64,3 @@ app.use((req: Request, res: Response) => {
    pela ARIDADE da função. Se você remover o `_next`, ele deixa de funcionar
    e você não recebe nenhum aviso.
    --------------------------------------------------------------------------- */
-app.use((erro: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  // Erro de entrada do usuário -> 400, com a mensagem.
-  if (erro instanceof ErroDeValidacao) {
-    return res.status(400).json({ erro: erro.message });
-  }
-
-  // Qualquer outra coisa é bug NOSSO. Loga completo no servidor...
-  console.error('[erro] Não tratado:', erro);
-
-  // ...e devolve uma mensagem genérica para o cliente.
-  // Stack trace na resposta HTTP entrega a estrutura interna do seu sistema
-  // (nomes de tabela, caminhos de arquivo) para quem estiver sondando.
-  return res.status(500).json({
-    erro: 'Erro interno do servidor.',
-    ...(env.nodeEnv === 'development' && {
-      detalhe: erro instanceof Error ? erro.message : String(erro),
-    }),
-  });
-});

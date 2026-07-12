@@ -1,12 +1,18 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { env } from '../env';
-import { buscarProximos } from '../repositories/profissionais.repository';
+import { buscarProximos, buscarPerfilPublico, atualizarPerfilProfissional } from '../repositories/profissionais.repository';
 import {
   numeroObrigatorio,
   numeroOpcional,
   textoOpcional,
   entre,
+  uuidObrigatorio,
+  ErroNaoEncontrado,
+  ErroDeValidacao,
 } from '../utils/validacao';
+import { buscarPortifolio, buscarResumoDeAvaliacoes } from '../repositories/avaliacoes.repository';
+import { exigirAutenticacao, exigirPapel } from '../middlewares/autenticacao';
+import { uploadFotoPerfil, urlPublicaDoArquivoPerfil } from '../middlewares/upload';
 
 export const profissionaisRouter = Router();
 
@@ -93,16 +99,4 @@ profissionaisRouter.get(
          --------------------------------------------------------------- */
       return res.json({
         parametros: { latitude, longitude, raio_km: raioKm, profissao: profissao ?? null },
-        pagina,
-        limite,
-        total_retornado: profissionais.length,
-        dados: profissionais,
-      });
-    } catch (erro) {
-      // Não trate o erro aqui. Empurre para o middleware central
-      // (veja app.ts). Um lugar só para formatar erro = respostas
-      // consistentes e nenhum stack trace vazando pro cliente.
-      return next(erro);
-    }
-  },
-);
+        pagi

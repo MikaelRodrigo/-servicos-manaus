@@ -11,6 +11,33 @@ export class ErroDeValidacao extends Error {
   }
 }
 
+/**
+ * Erro de CONFLITO -- ex.: e-mail/CPF/CNPJ que já existe. HTTP 409.
+ * Diferente de ErroDeValidacao (400): o dado está bem formado, só que já
+ * existe outro registro igual no banco.
+ */
+export class ErroDeConflito extends Error {
+  public readonly status = 409;
+
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = 'ErroDeConflito';
+  }
+}
+
+/**
+ * Recurso não encontrado -- ex.: GET /servicos/:id com um UUID que não
+ * existe na tabela. HTTP 404.
+ */
+export class ErroNaoEncontrado extends Error {
+  public readonly status = 404;
+
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = 'ErroNaoEncontrado';
+  }
+}
+
 /* ============================================================================
    Por que não `Number(req.query.latitude)` direto?
 
@@ -60,26 +87,4 @@ export function numeroOpcional(valor: unknown, campo: string, padrao: number): n
 }
 
 export function entre(n: number, min: number, max: number, campo: string): number {
-  if (n < min || n > max) {
-    throw new ErroDeValidacao(`"${campo}" deve estar entre ${min} e ${max}. Recebido: ${n}.`);
-  }
-  return n;
-}
-
-/** String opcional, aparada e limitada. Devolve undefined se ausente. */
-export function textoOpcional(valor: unknown, campo: string, maxLen = 100): string | undefined {
-  if (valor === undefined || valor === null) return undefined;
-
-  if (typeof valor !== 'string') {
-    throw new ErroDeValidacao(`O parâmetro "${campo}" deve ser texto.`);
-  }
-
-  const texto = valor.trim();
-  if (texto === '') return undefined;
-
-  if (texto.length > maxLen) {
-    throw new ErroDeValidacao(`"${campo}" excede ${maxLen} caracteres.`);
-  }
-
-  return texto;
-}
+  if (n < min || n > ma
