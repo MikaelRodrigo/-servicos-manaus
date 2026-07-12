@@ -221,23 +221,11 @@ class _ConteudoPerfil extends StatelessWidget {
                 ),
                 if (resumo.totalAvaliacoes > 0) ...[
                   const Divider(height: 24),
-                  _BlocoDistribuicaoCriterio(
-                    rotulo: 'Resolução de Problema',
-                    media: resumo.mediaTecnico,
-                    distribuicao: resumo.distribuicaoTecnico,
-                  ),
-                  const SizedBox(height: 16),
-                  _BlocoDistribuicaoCriterio(
-                    rotulo: 'Comportamental',
-                    media: resumo.mediaComportamental,
-                    distribuicao: resumo.distribuicaoComportamental,
-                  ),
-                  const SizedBox(height: 16),
-                  _BlocoDistribuicaoCriterio(
-                    rotulo: 'Custo benefício',
-                    media: resumo.mediaEconomico,
-                    distribuicao: resumo.distribuicaoEconomico,
-                  ),
+                  _BarraCriterio(rotulo: 'Resolução de Problema', media: resumo.mediaTecnico),
+                  const SizedBox(height: 10),
+                  _BarraCriterio(rotulo: 'Comportamental', media: resumo.mediaComportamental),
+                  const SizedBox(height: 10),
+                  _BarraCriterio(rotulo: 'Custo benefício', media: resumo.mediaEconomico),
                 ],
               ],
             ),
@@ -289,114 +277,47 @@ class _ConteudoPerfil extends StatelessWidget {
   }
 }
 
-/// Bloco de UM critério (ex.: "Resolução de Problema") no resumo do
-/// perfil: nome do critério + média à direita, e embaixo o gráfico de
-/// barras de distribuição (quantas avaliações deram cada nota, de 5 a 1).
-class _BlocoDistribuicaoCriterio extends StatelessWidget {
+/// Uma barra por critério (ex.: "Resolução de Problema"): rótulo à
+/// esquerda, uma barra preenchida na proporção da MÉDIA daquele critério
+/// (média / 5) e o número da média à direita -- 3 barras no total no
+/// resumo do perfil, uma por critério, nada de detalhar nota-a-nota.
+class _BarraCriterio extends StatelessWidget {
   final String rotulo;
   final double? media;
-  final List<int> distribuicao;
 
-  const _BlocoDistribuicaoCriterio({
-    required this.rotulo,
-    required this.media,
-    required this.distribuicao,
-  });
+  const _BarraCriterio({required this.rotulo, required this.media});
 
   @override
   Widget build(BuildContext context) {
-    // A barra de cada nota é desenhada proporcional à nota MAIS votada
-    // daquele critério (não ao total) -- é assim que a Shopee faz: a nota
-    // mais comum sempre enche a barra inteira, as outras ficam menores na
-    // proporção. Sem isso, critérios com poucas avaliações ficariam com
-    // barras minúsculas e ilegíveis.
-    final maiorQuantidade = distribuicao.isEmpty
-        ? 0
-        : distribuicao.reduce((a, b) => a > b ? a : b);
+    final fracao = media != null ? (media! / 5).clamp(0.0, 1.0) : 0.0;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              rotulo,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            Row(
-              children: [
-                _EstrelaMedia(valor: media, tamanho: 16),
-                const SizedBox(width: 6),
-                Text(media != null ? media!.toStringAsFixed(1) : '--'),
-              ],
-            ),
-          ],
+        SizedBox(
+          width: 130,
+          child: Text(rotulo, style: Theme.of(context).textTheme.bodySmall),
         ),
-        const SizedBox(height: 8),
-        for (var indice = 0; indice < distribuicao.length; indice++)
-          _LinhaDistribuicaoNota(
-            estrela: 5 - indice,
-            quantidade: distribuicao[indice],
-            maiorQuantidade: maiorQuantidade,
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: fracao,
+              minHeight: 8,
+              backgroundColor: Colors.grey.shade200,
+              valueColor: const AlwaysStoppedAnimation(Colors.amber),
+            ),
           ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 28,
+          child: Text(
+            media != null ? media!.toStringAsFixed(1) : '--',
+            textAlign: TextAlign.right,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
       ],
-    );
-  }
-}
-
-/// Uma linha do gráfico de barras: "5 estrelas [barra] 482". A barra usa
-/// `LinearProgressIndicator` só pelo visual (não indica progresso de
-/// verdade) -- é o widget mais simples do Flutter para uma barra
-/// preenchida proporcionalmente, com cantos arredondados via `ClipRRect`.
-class _LinhaDistribuicaoNota extends StatelessWidget {
-  final int estrela;
-  final int quantidade;
-  final int maiorQuantidade;
-
-  const _LinhaDistribuicaoNota({
-    required this.estrela,
-    required this.quantidade,
-    required this.maiorQuantidade,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final fracao = maiorQuantidade > 0 ? quantidade / maiorQuantidade : 0.0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 62,
-            child: Text(
-              '$estrela estrela${estrela == 1 ? '' : 's'}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: fracao,
-                minHeight: 8,
-                backgroundColor: Colors.grey.shade200,
-                valueColor: const AlwaysStoppedAnimation(Colors.amber),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 28,
-            child: Text(
-              '$quantidade',
-              textAlign: TextAlign.right,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

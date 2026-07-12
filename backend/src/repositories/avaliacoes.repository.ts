@@ -285,24 +285,13 @@ export async function alternarCurtidaAvaliacao(
   return { curtido, totalCurtidas: rows[0].total };
 }
 
-/**
- * Resumo numérico -- médias, contagem e DISTRIBUIÇÃO por critério. Base do
- * "selo de qualidade" na tela de perfil.
- *
- * distribuicao_* é um array de 5 posições, sempre na ordem
- * [nota 5, nota 4, nota 3, nota 2, nota 1] -- quantas avaliações deram cada
- * nota NAQUELE critério. É o dado por trás do gráfico de barras "5
- * estrelas ▬▬▬▬▬ 482 / 4 estrelas ▬ 10 / ..." no perfil público.
- */
+/** Resumo numérico -- médias e contagem. Base do "selo de qualidade" na tela de perfil. */
 export interface ResumoDeAvaliacoes {
   total_avaliacoes: number;
   media_tecnico: number | null;
   media_comportamental: number | null;
   media_economico: number | null;
   media_geral: number | null;
-  distribuicao_tecnico: number[];
-  distribuicao_comportamental: number[];
-  distribuicao_economico: number[];
 }
 
 export async function buscarResumoDeAvaliacoes(profissionalId: string): Promise<ResumoDeAvaliacoes> {
@@ -314,42 +303,12 @@ export async function buscarResumoDeAvaliacoes(profissionalId: string): Promise<
        ROUND(AVG(estrelas_economico)::numeric, 2)::float8      AS media_economico,
        ROUND(
          AVG((estrelas_tecnico + estrelas_comportamental + estrelas_economico) / 3.0)::numeric
-       , 2)::float8                                            AS media_geral,
-
-       -- Um array por critério, contando quantas avaliações deram cada
-       -- nota (5 a 1). COUNT(*) FILTER (WHERE ...) conta só as linhas
-       -- que batem a condição, dentro do MESMO agregado -- evita 5 queries
-       -- separadas por critério.
-       ARRAY[
-         COUNT(*) FILTER (WHERE estrelas_tecnico = 5),
-         COUNT(*) FILTER (WHERE estrelas_tecnico = 4),
-         COUNT(*) FILTER (WHERE estrelas_tecnico = 3),
-         COUNT(*) FILTER (WHERE estrelas_tecnico = 2),
-         COUNT(*) FILTER (WHERE estrelas_tecnico = 1)
-       ]::int[] AS distribuicao_tecnico,
-
-       ARRAY[
-         COUNT(*) FILTER (WHERE estrelas_comportamental = 5),
-         COUNT(*) FILTER (WHERE estrelas_comportamental = 4),
-         COUNT(*) FILTER (WHERE estrelas_comportamental = 3),
-         COUNT(*) FILTER (WHERE estrelas_comportamental = 2),
-         COUNT(*) FILTER (WHERE estrelas_comportamental = 1)
-       ]::int[] AS distribuicao_comportamental,
-
-       ARRAY[
-         COUNT(*) FILTER (WHERE estrelas_economico = 5),
-         COUNT(*) FILTER (WHERE estrelas_economico = 4),
-         COUNT(*) FILTER (WHERE estrelas_economico = 3),
-         COUNT(*) FILTER (WHERE estrelas_economico = 2),
-         COUNT(*) FILTER (WHERE estrelas_economico = 1)
-       ]::int[] AS distribuicao_economico
-
+       , 2)::float8                                            AS media_geral
      FROM avaliacoes_profissional
      WHERE profissional_id = $1`,
     [profissionalId],
   );
   // COUNT(*) sempre devolve uma linha, mesmo com zero avaliações (os AVG
-  // vêm NULL e os arrays de distribuição vêm [0,0,0,0,0] nesse caso) --
-  // por isso não precisamos de "?? valorPadrao" aqui.
+  // vêm NULL nesse caso) -- por isso não precisamos de "?? valorPadrao" aqui.
   return rows[0];
 }

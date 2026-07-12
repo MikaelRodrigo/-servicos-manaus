@@ -47,20 +47,12 @@ class PerfilProfissional {
 /// no backend). As médias vêm `null` quando o profissional ainda não tem
 /// nenhuma avaliação -- e é assim que a tela distingue "0 estrelas" (ruim)
 /// de "ninguém avaliou ainda" (neutro).
-///
-/// `distribuicao*` é sempre uma lista de 5 posições, na ordem
-/// [nota 5, nota 4, nota 3, nota 2, nota 1] -- quantas avaliações deram
-/// cada nota naquele critério. É o que alimenta o gráfico de barras
-/// "5 estrelas ▬▬▬ 482" no perfil.
 class ResumoAvaliacoes {
   final int totalAvaliacoes;
   final double? mediaTecnico;
   final double? mediaComportamental;
   final double? mediaEconomico;
   final double? mediaGeral;
-  final List<int> distribuicaoTecnico;
-  final List<int> distribuicaoComportamental;
-  final List<int> distribuicaoEconomico;
 
   const ResumoAvaliacoes({
     required this.totalAvaliacoes,
@@ -68,16 +60,7 @@ class ResumoAvaliacoes {
     required this.mediaComportamental,
     required this.mediaEconomico,
     required this.mediaGeral,
-    required this.distribuicaoTecnico,
-    required this.distribuicaoComportamental,
-    required this.distribuicaoEconomico,
   });
-
-  static List<int> _distribuicao(dynamic valor) {
-    return (valor as List<dynamic>? ?? const [0, 0, 0, 0, 0])
-        .map((item) => item as int)
-        .toList();
-  }
 
   factory ResumoAvaliacoes.fromJson(Map<String, dynamic> json) {
     return ResumoAvaliacoes(
@@ -86,9 +69,6 @@ class ResumoAvaliacoes {
       mediaComportamental: (json['media_comportamental'] as num?)?.toDouble(),
       mediaEconomico: (json['media_economico'] as num?)?.toDouble(),
       mediaGeral: (json['media_geral'] as num?)?.toDouble(),
-      distribuicaoTecnico: _distribuicao(json['distribuicao_tecnico']),
-      distribuicaoComportamental: _distribuicao(json['distribuicao_comportamental']),
-      distribuicaoEconomico: _distribuicao(json['distribuicao_economico']),
     );
   }
 }
