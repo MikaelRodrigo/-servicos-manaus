@@ -123,4 +123,91 @@ export async function buscarProximos(
     filtro.offset, // $6
   ];
 
-  const { rows } = await pool.q
+  const { rows } = await pool.query<ProfissionalProximo>(sql, valores);
+  return rows;
+}
+
+/** Perfil público completo -- a "carteira de visitas" que o app mostra ao tocar num pino do mapa. */
+export interface PerfilPublicoProfissional {
+  profissional_id: string;
+  tipo_pessoa: 'PF' | 'PJ';
+  nome_exibicao: string;
+  atuacao: string | null;
+  descricao: string | null;
+  url_foto_perfil: string | null;
+  contato: string;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * Busca os dados públicos de UM profissional, para a tela de perfil.
+ *
+ * Repare que `email` NÃO está na lista de colunas -- de propósito. Um
+ * perfil público serve para o cliente decidir se contrata, e para isso o
+ * `contato` (telefone/WhatsApp) já basta. Expor e-mail em uma rota pública
+ * sem autenticação é só dar de graça material para bots de spam raspar a
+ * base inteira.
+ */
+export async function buscarPerfilPublico(
+  profissionalId: string,
+): Promise<PerfilPublicoProfissional | null> {
+  const { rows } = await pool.query<PerfilPublicoProfissional>(
+    `SELECT
+       profissional_id,
+       tipo_pessoa,
+       COALESCE(nome, razao_social)           AS nome_exibicao,
+       COALESCE(profissao, categoria_atuacao) AS atuacao,
+       descricao,
+       url_foto_perfil,
+       contato,
+       latitude,
+       longitude
+     FROM profissionais
+     WHERE profissional_id = $1`,
+    [profissionalId],
+  );
+  return rows[0] ?? null;
+}
+
+/** O que a rota de edição entrega. `undefined` num campo = "não mexa nele". */
+export interface AtualizacaoPerfilProfissional {
+  descricao?: string;
+  urlFotoPerfil?: string;
+}
+
+/**
+ * Atualiza `descricao` e/ou `url_foto_perfil` de UM profissional -- sempre o
+ * DONO DO TOKEN (o `:id` nem existe nesta função; a rota só chama isto com
+ * `req.usuario.sub`). Não existe caminho para um profissional editar o
+ * perfil de outro.
+ *
+ * `COALESCE($2, descricao)`: se `dados.descricao` for `undefined` (o campo
+ * não veio no request), o parâmetro vira SQL `NULL`, e o COALESCE mantém o
+ * valor que já estava na coluna -- só substitui quando um valor de verdade é
+ * passado. É "atualização parcial" sem montar SQL dinâmico, no mesmo
+ * espírito do filtro opcional de `profissao` em `buscarProximos` acima.
+ */
+export async function atualizarPerfilProfissional(
+  profissionalId: string,
+  dados: AtualizacaoPerfilProfissional,
+): Promise<PerfilPublicoProfissional> {
+  const { rows } = await pool.query<PerfilPublicoProfissional>(
+    `UPDATE profissionais
+        SET descricao       = COALESCE($2, descricao),
+            url_foto_perfil = COALESCE($3, url_foto_perfil)
+      WHERE profissional_id = $1
+      RETURNING
+        profissional_id,
+        tipo_pessoa,
+        COALESCE(nome, razao_social)           AS nome_exibicao,
+        COALESCE(profissao, categoria_atuacao) AS atuacao,
+        descricao,
+        url_foto_perfil,
+        contato,
+        latitude,
+        longitude`,
+    [profissionalId, dados.descricao ?? null, dados.urlFotoPerfil ?? null],
+  );
+  return rows[0];
+}

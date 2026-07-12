@@ -87,4 +87,215 @@ export function numeroOpcional(valor: unknown, campo: string, padrao: number): n
 }
 
 export function entre(n: number, min: number, max: number, campo: string): number {
-  if (n < min || n > ma
+  if (n < min || n > max) {
+    throw new ErroDeValidacao(`"${campo}" deve estar entre ${min} e ${max}. Recebido: ${n}.`);
+  }
+  return n;
+}
+
+/** String opcional, aparada e limitada. Devolve undefined se ausente. */
+export function textoOpcional(valor: unknown, campo: string, maxLen = 100): string | undefined {
+  if (valor === undefined || valor === null) return undefined;
+
+  if (typeof valor !== 'string') {
+    throw new ErroDeValidacao(`O parâmetro "${campo}" deve ser texto.`);
+  }
+
+  const texto = valor.trim();
+  if (texto === '') return undefined;
+
+  if (texto.length > maxLen) {
+    throw new ErroDeValidacao(`"${campo}" excede ${maxLen} caracteres.`);
+  }
+
+  return texto;
+}
+
+/* ============================================================================
+   VALIDADORES DE BODY (Etapa 4 - cadastro/login)
+
+   Os validadores acima nasceram para query string (sempre string | undefined).
+   Body de POST chega como JSON já desserializado -- um número pode chegar
+   como number de verdade, uma data como string "1990-05-10", etc. Os
+   validadores abaixo são para ESSE formato.
+   ========================================================================= */
+
+/** String obrigatória, aparada, com tamanho mínimo/máximo. */
+export function textoObrigatorio(
+  valor: unknown,
+  campo: string,
+  opcoes: { min?: number; max?: number } = {},
+): string {
+  const { min = 1, max = 255 } = opcoes;
+
+  if (valor === undefined || valor === null || typeof valor !== 'string') {
+    throw new ErroDeValidacao(`O campo "${campo}" é obrigatório e deve ser texto.`);
+  }
+
+  const texto = valor.trim();
+  if (texto.length < min) {
+    throw new ErroDeValidacao(`O campo "${campo}" precisa ter ao menos ${min} caractere(s).`);
+  }
+  if (texto.length > max) {
+    throw new ErroDeValidacao(`O campo "${campo}" excede ${max} caracteres.`);
+  }
+
+  return texto;
+}
+
+/** Mesma regra do CHECK do banco (chk_*_email_formato) -- falhar aqui é mais barato que no Postgres. */
+export function emailValido(valor: unknown, campo = 'email'): string {
+  const texto = textoObrigatorio(valor, campo, { max: 255 }).toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(texto)) {
+    throw new ErroDeValidacao(`O campo "${campo}" não parece um e-mail válido.`);
+  }
+  return texto;
+}
+
+/** Remove tudo que não é dígito e confere o tamanho. NÃO valida dígito verificador. */
+export function apenasDigitos(valor: unknown, campo: string, tamanhoExato: number): string {
+  const texto = textoObrigatorio(valor, campo, { max: 30 });
+  const digitos = texto.replace(/\D/g, '');
+
+  if (digitos.length !== tamanhoExato) {
+    throw new ErroDeValidacao(
+      `O campo "${campo}" deve ter ${tamanhoExato} dígitos. Recebido: "${valor}".`,
+    );
+  }
+
+  return digitos;
+}
+
+/**
+ * Senha em texto puro, ainda ANTES do hash. Espelha a regex de
+ * `senhaAtendeRequisitosMinimos` em senha.ts -- mantidas em arquivos
+ * diferentes porque uma é regra de ENTRADA (aqui) e a outra é regra de
+ * DOMÍNIO (lá), mas o motivo de existirem é o mesmo.
+ */
+export function senhaObrigatoria(valor: unknown, campo = 'senha'): string {
+  if (valor === undefined || valor === null || typeof valor !== 'string') {
+    throw new ErroDeValidacao(`O campo "${campo}" é obrigatório.`);
+  }
+  if (valor.length < 8) {
+    throw new ErroDeValidacao(`O campo "${campo}" precisa ter ao menos 8 caracteres.`);
+  }
+  if (!/[A-Za-z]/.test(valor) || !/\d/.test(valor)) {
+    throw new ErroDeValidacao(`O campo "${campo}" precisa ter letras e números.`);
+  }
+  return valor;
+}
+
+/** Data no formato "AAAA-MM-DD", convertida e validada. */
+export function dataObrigatoria(valor: unknown, campo: string): string {
+  const texto = textoObrigatorio(valor, campo, { max: 10 });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(texto) || Number.isNaN(Date.parse(texto))) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve estar no formato AAAA-MM-DD.`);
+  }
+  return texto;
+}
+
+/**
+ * Número vindo de BODY JSON (não de query string). Diferença importante:
+ * `numeroObrigatorio` (lá em cima) exige `typeof valor === 'string'` porque
+ * query params SEMPRE chegam como string. Body de POST com Content-Type
+ * application/json chega DESSERIALIZADO -- `{"latitude": -3.13}` vira um
+ * `number` de verdade no `req.body.latitude`. Se você chamar o validador de
+ * query aqui, ele rejeita todo número válido com "deve ser informado uma
+ * única vez". Por isso este validador aceita `number` OU `string`.
+ */
+export function numeroDoBody(valor: unknown, campo: string): number {
+  if (valor === undefined || valor === null) {
+    throw new ErroDeValidacao(`O campo "${campo}" é obrigatório.`);
+  }
+
+  if (typeof valor === 'number') {
+    if (!Number.isFinite(valor)) {
+      throw new ErroDeValidacao(`O campo "${campo}" deve ser um número finito.`);
+    }
+    return valor;
+  }
+
+  if (typeof valor === 'string') {
+    const texto = valor.trim();
+    const n = Number(texto);
+    if (texto === '' || !Number.isFinite(n)) {
+      throw new ErroDeValidacao(`O campo "${campo}" deve ser um número. Recebido: "${valor}".`);
+    }
+    return n;
+  }
+
+  throw new ErroDeValidacao(`O campo "${campo}" deve ser um número.`);
+}
+
+/** enum literal 'PF' | 'PJ' -- qualquer outra coisa é 400. */
+export function tipoPessoaObrigatorio(valor: unknown, campo = 'tipo_pessoa'): 'PF' | 'PJ' {
+  if (valor !== 'PF' && valor !== 'PJ') {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser "PF" ou "PJ". Recebido: ${valor}.`);
+  }
+  return valor;
+}
+
+/* ============================================================================
+   VALIDADORES DO MÓDULO DE SERVIÇOS
+
+   id_servico, cliente_id e profissional_id são todos UUID (é o tipo da
+   PRIMARY KEY no schema, gerado por gen_random_uuid()). Um UUID mal formado
+   NUNCA vai casar com nenhuma linha -- mas é melhor barrar isso aqui, com
+   uma mensagem clara, do que deixar o Postgres devolver um erro de sintaxe
+   feio ("invalid input syntax for type uuid").
+   ========================================================================= */
+const REGEX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function uuidObrigatorio(valor: unknown, campo: string): string {
+  if (typeof valor !== 'string' || !REGEX_UUID.test(valor)) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser um UUID válido.`);
+  }
+  return valor;
+}
+
+/**
+ * Espelha o ENUM `status_servico_enum` do banco (Seção 1 do 01_schema.sql).
+ * Se um dia você adicionar um status novo no banco, adicione aqui também --
+ * TypeScript não lê o schema do Postgres sozinho.
+ */
+export const STATUS_SERVICO_VALIDOS = [
+  'SOLICITADO',
+  'ACEITO',
+  'EM_ANDAMENTO',
+  'CONCLUIDO',
+  'CANCELADO',
+  'RECUSADO',
+] as const;
+
+export type StatusServico = (typeof STATUS_SERVICO_VALIDOS)[number];
+
+/** Filtro OPCIONAL de status na query string (?status=ACEITO). */
+export function statusServicoOpcional(valor: unknown, campo = 'status'): StatusServico | undefined {
+  const texto = textoOpcional(valor, campo, 20);
+  if (texto === undefined) return undefined;
+
+  const maiuscula = texto.toUpperCase();
+  if (!(STATUS_SERVICO_VALIDOS as readonly string[]).includes(maiuscula)) {
+    throw new ErroDeValidacao(
+      `"${campo}" deve ser um de: ${STATUS_SERVICO_VALIDOS.join(', ')}. Recebido: "${texto}".`,
+    );
+  }
+  return maiuscula as StatusServico;
+}
+
+/* ============================================================================
+   VALIDADORES DO MÓDULO DE AVALIAÇÕES
+
+   Todas as colunas de nota são SMALLINT com CHECK (... BETWEEN 1 AND 5) no
+   banco (Seções 6 e 7 do 01_schema.sql). Validar aqui também não é
+   redundância inútil -- é a diferença entre o usuário receber "estrelas_
+   tecnico deve ser de 1 a 5" (400, claro) e receber um erro cru de
+   constraint do Postgres (feio, e vaza nome de coluna interna).
+   ========================================================================= */
+export function notaObrigatoria(valor: unknown, campo: string): number {
+  const n = numeroDoBody(valor, campo);
+  if (!Number.isInteger(n) || n < 1 || n > 5) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser um número inteiro de 1 a 5.`);
+  }
+  return n;
+}

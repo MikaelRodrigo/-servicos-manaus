@@ -64,3 +64,43 @@ app.use((req: Request, res: Response) => {
    pela ARIDADE da função. Se você remover o `_next`, ele deixa de funcionar
    e você não recebe nenhum aviso.
    --------------------------------------------------------------------------- */
+app.use((erro: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  // Erro de entrada do usuário -> 400, com a mensagem.
+  if (erro instanceof ErroDeValidacao) {
+    return res.status(400).json({ erro: erro.message });
+  }
+
+  // E-mail/CPF/CNPJ já cadastrado -> 409 (conflito), não 400: o dado está
+  // bem formado, só que já existe outro registro igual.
+  if (erro instanceof ErroDeConflito) {
+    return res.status(409).json({ erro: erro.message });
+  }
+
+  // Token ausente/inválido/expirado (401) ou papel sem permissão (403).
+  if (erro instanceof ErroDeAutenticacao) {
+    return res.status(erro.status).json({ erro: erro.message });
+  }
+
+  // Recurso que não existe -> 404 (ex.: GET /servicos/:id com UUID inexistente).
+  if (erro instanceof ErroNaoEncontrado) {
+    return res.status(404).json({ erro: erro.message });
+  }
+
+  // Erro do multer (arquivo grande demais, campo errado etc.) -> 400.
+  if (ehErroDeUpload(erro)) {
+    return res.status(400).json({ erro: mensagemDeErroUpload(erro) });
+  }
+
+  // Qualquer outra coisa é bug NOSSO. Loga completo no servidor...
+  console.error('[erro] Não tratado:', erro);
+
+  // ...e devolve uma mensagem genérica para o cliente.
+  // Stack trace na resposta HTTP entrega a estrutura interna do seu sistema
+  // (nomes de tabela, caminhos de arquivo) para quem estiver sondando.
+  return res.status(500).json({
+    erro: 'Erro interno do servidor.',
+    ...(env.nodeEnv === 'development' && {
+      detalhe: erro instanceof Error ? erro.message : String(erro),
+    }),
+  });
+});

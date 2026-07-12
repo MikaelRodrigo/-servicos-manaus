@@ -4,6 +4,8 @@ API de serviços geolocalizados focada em Manaus/AM. Conecta clientes a profissi
 
 **Stack:** Node.js · TypeScript · Express · PostgreSQL + PostGIS (hospedado no Neon) · Flutter (mobile, em desenvolvimento).
 
+> **Novo no projeto?** Veja **[`CONTRIBUTING.md`](./CONTRIBUTING.md)** para o guia completo de setup (backend + app Flutter) e **[`PROGRESSO.md`](./PROGRESSO.md)** para o histórico de sessões e pendências atuais.
+
 ---
 
 ## Antes de começar

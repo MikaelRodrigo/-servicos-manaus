@@ -235,4 +235,3 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
 authRouter.get('/me', exigirAutenticacao, (req: Request, res: Response) => {
   res.json({ usuario: req.usuario });
 });
-                                                                                                                                                                                                

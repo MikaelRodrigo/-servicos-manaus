@@ -37,4 +37,11 @@ export const env = {
   raioMaximoKm: numero('RAIO_MAXIMO_KM', 50),
 
   jwt: {
- 
+    // Sem valor obrigatório aqui seria fácil esquecer de definir em produção
+    // e o app "funcionar" assinando tokens com um segredo previsível.
+    secret: obrigatoria('JWT_SECRET'),
+    expiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
+  },
+
+  bcryptSaltRounds: numero('BCRYPT_SALT_ROUNDS', 10),
+} as const;
