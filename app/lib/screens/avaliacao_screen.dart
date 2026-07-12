@@ -145,9 +145,14 @@ class _AvaliacaoScreenState extends State<AvaliacaoScreen> {
     // comentário) é a mesma. Ver avaliacoes.repository.ts no backend:
     // avaliacoes_profissional tem estrelas_tecnico/comportamental/economico;
     // avaliacoes_cliente tem estrelas_clareza/comportamental/pagamento.
-    final rotulo1 = ehCliente ? 'Qualidade técnica' : 'Clareza do pedido';
-    final rotulo2 = 'Comportamento';
-    final rotulo3 = ehCliente ? 'Custo-benefício' : 'Pagamento em dia';
+    //
+    // Nomes dos critérios de quem avalia o PROFISSIONAL alinhados com o que
+    // aparece no perfil público dele (ver `_BlocoDistribuicaoCriterio` em
+    // perfil_profissional_screen.dart) -- mesmo rótulo em toda a jornada,
+    // do formulário de avaliação até o gráfico de distribuição.
+    final rotulo1 = ehCliente ? 'Resolução de Problema' : 'Clareza do pedido';
+    final rotulo2 = 'Comportamental';
+    final rotulo3 = ehCliente ? 'Custo benefício' : 'Pagamento em dia';
 
     return Scaffold(
       appBar: AppBar(title: Text('Avaliar $nomeDoAvaliado')),

@@ -39,25 +39,25 @@ export interface AvaliacaoCliente {
 // CRIAR (o cliente avalia o profissional) -- agora com VÁRIAS fotos
 // ---------------------------------------------------------------------------
 
-/** O que `criarAvaliacaoProfissional` devolve: a avaliação + as fotos já anexadas. */
+/** O que criarAvaliacaoProfissional devolve: a avaliação + as fotos já anexadas. */
 export interface AvaliacaoProfissionalComFotos extends AvaliacaoProfissional {
   urls_fotos: string[];
 }
 
 /**
  * Cria a avaliação e, se houver fotos, grava todas na tabela filha
- * `avaliacoes_profissional_fotos` -- as duas coisas dentro de UMA
+ * avaliacoes_profissional_fotos -- as duas coisas dentro de UMA
  * transação. Por quê? Porque são duas operações dependentes: se o INSERT
  * das fotos falhasse depois do INSERT da avaliação já ter sido confirmado,
  * o cliente veria "avaliação enviada" mas as fotos que ele escolheu
  * sumiriam silenciosamente. Com transação, ou as duas coisas acontecem, ou
- * nenhuma -- `ROLLBACK` desfaz tudo se qualquer passo falhar.
+ * nenhuma -- ROLLBACK desfaz tudo se qualquer passo falhar.
  *
  * Esta é a primeira transação explícita do projeto (até aqui, cada rota só
  * fazia UM INSERT/UPDATE por vez, que o Postgres já trata atomicamente
  * sozinho). Sempre que uma operação virar "duas ou mais escritas que
  * precisam ou acontecer juntas ou não acontecer", é sinal de que chegou a
- * hora de usar `BEGIN`/`COMMIT`/`ROLLBACK` como aqui.
+ * hora de usar BEGIN/COMMIT/ROLLBACK como aqui.
  */
 export async function criarAvaliacaoProfissional(dados: {
   idServico: string;
@@ -69,10 +69,10 @@ export async function criarAvaliacaoProfissional(dados: {
   comentario?: string;
   urlsFotos?: string[];
 }): Promise<AvaliacaoProfissionalComFotos> {
-  // `pool.connect()` pega UMA conexão dedicada do pool -- diferente de
-  // `pool.query(...)`, que pode usar uma conexão DIFERENTE a cada chamada.
+  // pool.connect() pega UMA conexão dedicada do pool -- diferente de
+  // pool.query(...), que pode usar uma conexão DIFERENTE a cada chamada.
   // Uma transação só faz sentido se todos os comandos rodarem na MESMA
-  // conexão (é a conexão, não o `pool`, que sabe "eu estou no meio de uma
+  // conexão (é a conexão, não o pool, que sabe "eu estou no meio de uma
   // transação agora").
   const client = await pool.connect();
 
@@ -179,7 +179,7 @@ export async function buscarAvaliacaoClientePorServico(
 // PORTFÓLIO PÚBLICO do profissional (GET /profissionais/:id/portfolio)
 // ---------------------------------------------------------------------------
 
-/** Espelha as colunas da view `vw_historico_portifolio` (Seção 3 da migração 05). */
+/** Espelha as colunas da view vw_historico_portifolio (Seção 3 da migração 05). */
 export interface ItemDePortfolio {
   profissional_id: string;
   id_servico: string;
@@ -196,18 +196,18 @@ export interface ItemDePortfolio {
   total_curtidas: number;
   data_conclusao: string;
   data_avaliacao: string;
-  /** Só é `true` quando `usuarioIdAtual` foi informado E essa pessoa já curtiu. */
+  /** Só é true quando usuarioIdAtual foi informado E essa pessoa já curtiu. */
   curtido_por_mim: boolean;
 }
 
 /**
- * Busca o portfólio público, já com `curtido_por_mim` calculado.
+ * Busca o portfólio público, já com curtido_por_mim calculado.
  *
- * `usuarioIdAtual` é OPCIONAL de propósito: esta rota é pública (qualquer
+ * usuarioIdAtual é OPCIONAL de propósito: esta rota é pública (qualquer
  * visitante vê o portfólio, mesmo sem conta -- é o que convence alguém a
  * se cadastrar). Quando a pessoa está logada, a rota manda o ID dela e a
- * gente marca quais avaliações ela já curtiu; sem login, `curtido_por_mim`
- * vem sempre `false` (mostrar "curtido" para quem nunca curtiu nada seria
+ * gente marca quais avaliações ela já curtiu; sem login, curtido_por_mim
+ * vem sempre false (mostrar "curtido" para quem nunca curtiu nada seria
  * um bug de exibição, não uma feature).
  */
 export async function buscarPortifolio(
@@ -250,8 +250,8 @@ export async function avaliacaoProfissionalExiste(avaliacaoId: string): Promise<
  * não tinha, adiciona. É o comportamento padrão de botão "like" -- clicar
  * de novo desfaz o clique anterior.
  *
- * `DELETE ... RETURNING` é o truque para saber, numa query só, se a linha
- * existia: `rowCount > 0` quer dizer "existia e acabamos de apagar".
+ * DELETE ... RETURNING é o truque para saber, numa query só, se a linha
+ * existia: rowCount > 0 quer dizer "existia e acabamos de apagar".
  */
 export async function alternarCurtidaAvaliacao(
   avaliacaoId: string,
@@ -285,13 +285,24 @@ export async function alternarCurtidaAvaliacao(
   return { curtido, totalCurtidas: rows[0].total };
 }
 
-/** Resumo numérico -- médias e contagem. Base do "selo de qualidade" na tela de perfil. */
+/**
+ * Resumo numérico -- médias, contagem e DISTRIBUIÇÃO por critério. Base do
+ * "selo de qualidade" na tela de perfil.
+ *
+ * distribuicao_* é um array de 5 posições, sempre na ordem
+ * [nota 5, nota 4, nota 3, nota 2, nota 1] -- quantas avaliações deram cada
+ * nota NAQUELE critério. É o dado por trás do gráfico de barras "5
+ * estrelas ▬▬▬▬▬ 482 / 4 estrelas ▬ 10 / ..." no perfil público.
+ */
 export interface ResumoDeAvaliacoes {
   total_avaliacoes: number;
   media_tecnico: number | null;
   media_comportamental: number | null;
   media_economico: number | null;
   media_geral: number | null;
+  distribuicao_tecnico: number[];
+  distribuicao_comportamental: number[];
+  distribuicao_economico: number[];
 }
 
 export async function buscarResumoDeAvaliacoes(profissionalId: string): Promise<ResumoDeAvaliacoes> {
@@ -303,12 +314,42 @@ export async function buscarResumoDeAvaliacoes(profissionalId: string): Promise<
        ROUND(AVG(estrelas_economico)::numeric, 2)::float8      AS media_economico,
        ROUND(
          AVG((estrelas_tecnico + estrelas_comportamental + estrelas_economico) / 3.0)::numeric
-       , 2)::float8                                            AS media_geral
+       , 2)::float8                                            AS media_geral,
+
+       -- Um array por critério, contando quantas avaliações deram cada
+       -- nota (5 a 1). COUNT(*) FILTER (WHERE ...) conta só as linhas
+       -- que batem a condição, dentro do MESMO agregado -- evita 5 queries
+       -- separadas por critério.
+       ARRAY[
+         COUNT(*) FILTER (WHERE estrelas_tecnico = 5),
+         COUNT(*) FILTER (WHERE estrelas_tecnico = 4),
+         COUNT(*) FILTER (WHERE estrelas_tecnico = 3),
+         COUNT(*) FILTER (WHERE estrelas_tecnico = 2),
+         COUNT(*) FILTER (WHERE estrelas_tecnico = 1)
+       ]::int[] AS distribuicao_tecnico,
+
+       ARRAY[
+         COUNT(*) FILTER (WHERE estrelas_comportamental = 5),
+         COUNT(*) FILTER (WHERE estrelas_comportamental = 4),
+         COUNT(*) FILTER (WHERE estrelas_comportamental = 3),
+         COUNT(*) FILTER (WHERE estrelas_comportamental = 2),
+         COUNT(*) FILTER (WHERE estrelas_comportamental = 1)
+       ]::int[] AS distribuicao_comportamental,
+
+       ARRAY[
+         COUNT(*) FILTER (WHERE estrelas_economico = 5),
+         COUNT(*) FILTER (WHERE estrelas_economico = 4),
+         COUNT(*) FILTER (WHERE estrelas_economico = 3),
+         COUNT(*) FILTER (WHERE estrelas_economico = 2),
+         COUNT(*) FILTER (WHERE estrelas_economico = 1)
+       ]::int[] AS distribuicao_economico
+
      FROM avaliacoes_profissional
      WHERE profissional_id = $1`,
     [profissionalId],
   );
   // COUNT(*) sempre devolve uma linha, mesmo com zero avaliações (os AVG
-  // vêm NULL nesse caso) -- por isso não precisamos de `?? valorPadrao` aqui.
+  // vêm NULL e os arrays de distribuição vêm [0,0,0,0,0] nesse caso) --
+  // por isso não precisamos de "?? valorPadrao" aqui.
   return rows[0];
 }
