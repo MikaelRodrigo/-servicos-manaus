@@ -3,114 +3,177 @@ import { ErroDeValidacao } from '../utils/validacao';
 /* ============================================================================
    GEOCODIFICAÇÃO POR CEP
 
-   Este é o primeiro lugar do backend que fala com um serviço EXTERNO (fora
+   Este é o primeiro lugar do backend que fala com serviços EXTERNOS (fora
    do nosso próprio banco). Por isso mora numa pasta nova, `services/` --
    diferente de `repositories/` (só sabe falar com o NOSSO Postgres) e de
    `utils/` (funções puras, sem I/O nenhum).
 
-   Usamos a BrasilAPI (https://brasilapi.com.br/api/cep/v2/{cep}), gratuita e
-   sem necessidade de chave/cadastro. Ela devolve o endereço (rua, bairro,
-   cidade, UF) E, quando consegue geocodificar via OpenStreetMap/Nominatim,
-   a coordenada (`location.coordinates`). Preferimos a v2 (não a v1)
-   exatamente por causa dessa coordenada -- é o que permite ao profissional
-   aparecer na busca por proximidade do mapa (ST_DWithin, ver
-   profissionais.repository.ts) só digitando um CEP, sem precisar de GPS.
+   POR QUE DOIS SERVIÇOS (ViaCEP + Nominatim) EM VEZ DE UM SÓ?
 
-   `fetch` é GLOBAL a partir do Node 18 (não precisa instalar node-fetch/axios
-   -- ver "dependencies" em package.json, que de propósito não tem nenhum
-   cliente HTTP: não faz falta).
+   A primeira versão usava a BrasilAPI v2 (que devolve endereço E coordenada
+   numa chamada só). Na prática, para CEPs de Manaus/Norte a coordenada veio
+   vazia com frequência -- a geocodificação embutida da BrasilAPI usa
+   OpenStreetMap/Nominatim, e a cobertura de endereço-a-ponto do OSM no
+   Norte do Brasil é bem mais fraca que no Sul/Sudeste. CEP existe, endereço
+   é encontrado, mas "onde fica no mapa" não tem resposta -- e a rota
+   simplesmente falhava.
+
+   A solução: separar as duas responsabilidades.
+     1) ViaCEP (https://viacep.com.br) -- SÓ acha o endereço a partir do CEP.
+        Não tenta geocodificar, então não tem esse jeito de falhar; para
+        qualquer CEP válido, o endereço vem quase sempre.
+     2) Nominatim (https://nominatim.openstreetmap.org) -- geocodificamos
+        NÓS MESMOS, com uma ESCADA de tentativas cada vez mais genéricas:
+        rua+bairro+cidade -> bairro+cidade -> só cidade. Se o endereço exato
+        não geocodificar, caímos para o bairro; se nem o bairro, caímos para
+        o centro da cidade. Uma cidade inteira SEMPRE existe no OSM -- então
+        no pior caso o profissional aparece no centro da cidade dele (ainda
+        útil: aparece na busca por proximidade) em vez de a atualização de
+        perfil simplesmente falhar.
    ========================================================================= */
 
 export interface LocalizacaoPorCep {
   latitude: number;
   longitude: number;
-  /** Ex.: "Rua Doutor Luiz de Freitas Melro, Centro, Blumenau - SC". */
+  /** Ex.: "Rua Doutor Luiz de Freitas Melro, Centro, Manaus - AM". */
   enderecoFormatado: string;
 }
 
-/** Só o que a gente lê da resposta da BrasilAPI -- ela devolve mais campos, ignoramos o resto. */
-interface RespostaBrasilApiCepV2 {
-  street?: string;
-  neighborhood?: string;
-  city?: string;
-  state?: string;
-  location?: {
-    coordinates?: {
-      // A BrasilAPI devolve como STRING, não number -- por isso convertemos
-      // com Number(...) abaixo, nunca assumindo que já vem numérico.
-      latitude?: string;
-      longitude?: string;
-    };
-  };
+interface RespostaViaCep {
+  erro?: boolean;
+  logradouro?: string;
+  bairro?: string;
+  localidade?: string; // cidade
+  uf?: string;
+}
+
+interface ResultadoNominatim {
+  lat: string;
+  lon: string;
+}
+
+/** Nominatim exige um User-Agent identificando a aplicação -- é a política deles, não uma chave de API. */
+const USER_AGENT_NOMINATIM = 'servicos-manaus-app/1.0 (uso interno, geocodificacao de CEP)';
+
+/** Timeout curto em cada chamada externa -- não faz sentido a atualização de perfil travar minutos esperando um serviço fora do ar. */
+async function buscarComTimeout(url: string, cabecalhos: Record<string, string> = {}, timeoutMs = 8000): Promise<Response> {
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), timeoutMs);
+  try {
+    return await fetch(url, { headers: cabecalhos, signal: controlador.signal });
+  } finally {
+    clearTimeout(temporizador);
+  }
 }
 
 /**
- * Consulta um CEP e devolve coordenadas + endereço formatado, prontos para
- * gravar em `profissionais.latitude`/`longitude`/`endereco_atuacao`.
+ * Busca o endereço (rua/bairro/cidade/UF) de um CEP via ViaCEP.
  *
- * `cep` já deve chegar VALIDADO (8 dígitos, só números -- ver
- * `apenasDigitos` em utils/validacao.ts, chamado pela rota antes desta
- * função). Esta função só cuida da parte externa: consultar e interpretar
- * a resposta.
- *
- * Lança `ErroDeValidacao` (400) para QUALQUER falha -- CEP inexistente,
- * serviço fora do ar, ou CEP que existe mas o provedor de geocodificação não
- * conseguiu resolver coordenada (acontece com CEPs muito novos ou rurais).
- * Do ponto de vista de quem chamou a rota, o efeito é o mesmo nos três
- * casos: "não deu pra definir sua localização com esse CEP agora" -- por
- * isso um único tipo de erro, com mensagens diferentes por causa.
+ * `cep` já deve chegar VALIDADO (8 dígitos -- ver `apenasDigitos` em
+ * utils/validacao.ts, chamado pela rota antes desta função).
  */
-export async function buscarLocalizacaoPorCep(cep: string): Promise<LocalizacaoPorCep> {
+async function buscarEnderecoPorCep(cep: string): Promise<RespostaViaCep> {
   let resposta: Response;
   try {
-    resposta = await fetch(`https://brasilapi.com.br/api/cep/v2/${cep}`);
+    resposta = await buscarComTimeout(`https://viacep.com.br/ws/${cep}/json/`);
   } catch {
-    // Falha de rede (DNS, timeout, serviço fora do ar) -- não é culpa do
-    // usuário, mas também não temos como resolver aqui. Mensagem pede para
-    // tentar de novo mais tarde, sem vazar detalhe técnico.
     throw new ErroDeValidacao(
       'Não foi possível consultar o CEP agora. Tente novamente em instantes.',
     );
   }
 
   if (!resposta.ok) {
-    // A BrasilAPI devolve 404 quando nenhum provedor conhece o CEP.
-    // Qualquer outro status (5xx, etc.) também vira "CEP não encontrado"
-    // do ponto de vista do usuário -- não faz sentido diferenciar aqui.
+    throw new ErroDeValidacao('Não foi possível consultar o CEP agora. Tente novamente em instantes.');
+  }
+
+  const dados = (await resposta.json()) as RespostaViaCep;
+
+  // ViaCEP devolve HTTP 200 mesmo para CEP inexistente -- o jeito de saber
+  // é o campo `erro: true` no corpo da resposta.
+  if (dados.erro) {
     throw new ErroDeValidacao('CEP não encontrado. Confira os 8 dígitos e tente novamente.');
   }
 
-  const dados = (await resposta.json()) as RespostaBrasilApiCepV2;
+  return dados;
+}
 
-  const latitudeTexto = dados.location?.coordinates?.latitude;
-  const longitudeTexto = dados.location?.coordinates?.longitude;
+/**
+ * Geocodifica UM texto de busca via Nominatim. Devolve `null` (não lança
+ * erro) quando não encontra nada -- é o sinal para `buscarLocalizacaoPorCep`
+ * tentar a próxima tentativa da escada, mais genérica.
+ */
+async function geocodificar(query: string): Promise<{ latitude: number; longitude: number } | null> {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(query)}`;
 
-  // A BrasilAPI às vezes acha o ENDEREÇO mas não consegue geocodificar
-  // (coordinates vem como objeto vazio `{}`) -- CEP existe, mas sem
-  // coordenada não tem como definir a localização no mapa.
-  if (!latitudeTexto || !longitudeTexto) {
+  let resposta: Response;
+  try {
+    resposta = await buscarComTimeout(url, { 'User-Agent': USER_AGENT_NOMINATIM });
+  } catch {
+    return null;
+  }
+
+  if (!resposta.ok) return null;
+
+  const resultados = (await resposta.json()) as ResultadoNominatim[];
+  if (resultados.length === 0) return null;
+
+  const latitude = Number(resultados[0].lat);
+  const longitude = Number(resultados[0].lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  return { latitude, longitude };
+}
+
+/**
+ * Consulta um CEP e devolve coordenadas + endereço formatado, prontos para
+ * gravar em `profissionais.latitude`/`longitude`/`endereco_atuacao`.
+ *
+ * Tenta geocodificar do mais PRECISO para o mais GENÉRICO, parando na
+ * primeira tentativa que funcionar:
+ *   1. rua + bairro + cidade - UF
+ *   2. bairro + cidade - UF
+ *   3. cidade - UF   (quase sempre funciona -- é o "pior caso aceitável")
+ *
+ * Só lança `ErroDeValidacao` se o CEP nem existir (ViaCEP) ou se ATÉ o
+ * nível de cidade falhar geocodificar (raríssimo -- praticamente só
+ * aconteceria com Nominatim fora do ar).
+ */
+export async function buscarLocalizacaoPorCep(cep: string): Promise<LocalizacaoPorCep> {
+  const endereco = await buscarEnderecoPorCep(cep);
+
+  const cidadeEstado =
+    endereco.localidade && endereco.uf ? `${endereco.localidade} - ${endereco.uf}` : endereco.localidade;
+
+  // Cada item é uma tentativa de geocodificação, da mais específica pra
+  // mais genérica. `null` é filtrado -- não faz sentido tentar geocodificar
+  // uma query vazia porque o ViaCEP não devolveu aquele campo.
+  const tentativas = [
+    endereco.logradouro && endereco.bairro && cidadeEstado
+      ? `${endereco.logradouro}, ${endereco.bairro}, ${cidadeEstado}, Brasil`
+      : null,
+    endereco.bairro && cidadeEstado ? `${endereco.bairro}, ${cidadeEstado}, Brasil` : null,
+    cidadeEstado ? `${cidadeEstado}, Brasil` : null,
+  ].filter((query): query is string => query !== null);
+
+  let coordenada: { latitude: number; longitude: number } | null = null;
+  for (const tentativa of tentativas) {
+    coordenada = await geocodificar(tentativa);
+    if (coordenada) break;
+  }
+
+  if (!coordenada) {
     throw new ErroDeValidacao(
-      'Não foi possível encontrar a localização exata desse CEP. Tente o CEP de uma rua ou avenida próxima.',
+      'Não foi possível encontrar a localização desse CEP agora. Tente novamente em instantes.',
     );
   }
 
-  const latitude = Number(latitudeTexto);
-  const longitude = Number(longitudeTexto);
-
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    throw new ErroDeValidacao('Não foi possível encontrar a localização exata desse CEP.');
-  }
-
-  // Monta "Rua X, Bairro Y, Cidade - UF" pulando qualquer parte que não veio
-  // (nem toda resposta tem `street`, por exemplo).
-  const cidadeEstado = dados.city && dados.state ? `${dados.city} - ${dados.state}` : dados.city;
-  const partes = [dados.street, dados.neighborhood, cidadeEstado].filter(
-    (parte) => !!parte && parte.trim() !== '',
+  const partes = [endereco.logradouro, endereco.bairro, cidadeEstado].filter(
+    (parte): parte is string => !!parte && parte.trim() !== '',
   );
 
   return {
-    latitude,
-    longitude,
+    latitude: coordenada.latitude,
+    longitude: coordenada.longitude,
     enderecoFormatado: partes.length > 0 ? partes.join(', ') : `CEP ${cep}`,
   };
 }
