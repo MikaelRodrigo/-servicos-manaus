@@ -136,3 +136,43 @@ Cliente precisava de um perfil próprio (foto, dados pessoais visíveis, ediçã
 3. Migrações `04` e `05` (sessões anteriores) — confirmar se já foram de fato aplicadas no Neon; se não, aplicar junto com a `06` na mesma sessão de banco.
 4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
 
+
+---
+
+## Sessão de 12/07/2026 (continuação 3 — foto do cliente no portfólio + CEP do profissional)
+
+### Pedido
+1. Associar a foto de perfil do cliente às avaliações que ele faz para profissionais (no portfólio).
+2. O profissional passa a informar um CEP (em vez de texto livre) para definir sua localização no mapa; remover o número de contato do profissional do portfólio público.
+
+### Descoberta importante
+Pesquisa mostrou que `latitude`/`longitude` de `profissionais`/`clientes` NUNCA foram capturadas em lugar nenhum (a tela de cadastro não envia coordenadas, e não existia via de edição depois). Ou seja, até esta sessão, **nenhum profissional aparecia na busca por proximidade do mapa** — bug latente, não só uma melhoria. A etapa do CEP resolve isso de verdade, não é só um "extra".
+
+### O que foi feito
+
+**1. Foto do cliente no portfólio**
+- `database/07_foto_cliente_portfolio.sql` — `vw_historico_portifolio` passa a expor `clientes.url_foto_perfil` como `url_foto_cliente` (DROP+CREATE VIEW, mesmo padrão da migração 05).
+- Backend: `ItemDePortfolio` ganha `url_foto_cliente` (o `SELECT v.*` em `buscarPortifolio` já propaga a coluna nova, sem precisar mudar a query).
+- Flutter: `ItemPortfolio` ganha `urlFotoCliente`; `_CartaoPortfolio` usa a foto real do cliente no avatar do card, com fallback para iniciais quando o cliente não tiver foto.
+
+**2. CEP define localização do profissional + remoção do contato**
+- `database/08_cep_profissional.sql` — nova coluna `profissionais.cep`. `endereco_atuacao` muda de significado: era texto livre digitado, agora é AUTOMÁTICO (derivado do CEP).
+- `backend/src/services/cep.ts` (novo, primeira pasta `services/` do projeto — para chamadas a APIs externas, diferente de `repositories/` que só fala com o Postgres) — consulta a BrasilAPI (`GET /api/cep/v2/{cep}`, gratuita, sem chave) usando `fetch` nativo do Node 18+ (nenhuma dependência nova). Devolve `{latitude, longitude, enderecoFormatado}` ou lança `ErroDeValidacao` amigável (CEP inexistente, serviço fora do ar, ou CEP sem coordenada geocodificável).
+- `PATCH /profissionais/me` troca o campo `endereco_atuacao` (texto livre) por `cep` (8 dígitos): a rota geocodifica e grava `cep`+`latitude`+`longitude`+`endereco_atuacao` de uma vez só (os quatro sempre juntos, nunca parciais).
+- Removido `contato` de `PerfilPublicoProfissional`, `buscarPerfilPublico` e `atualizarPerfilProfissional` (SELECT e RETURNING) — não é só ocultado na tela, o backend PARA de devolver o telefone nessa rota pública. (`buscarProximos`/`/proximos`, usada só para os pinos do mapa, não foi alterada — fora do escopo do pedido.)
+- Flutter: `editar_perfil_screen.dart` troca o campo de texto livre por um campo de CEP (numérico, 8 dígitos, `FilteringTextInputFormatter.digitsOnly`), sempre vazio ao abrir a tela (mesmo padrão do seletor de foto — é só ENTRADA), mostrando "Localização atual: ..." como texto informativo abaixo. `PerfilProfissional` e a tela de perfil público perderam o campo/exibição de `contato`.
+
+### Verificação feita
+- Balanceamento de chaves/parênteses/colchetes (script Python) em todos os arquivos Dart alterados — OK.
+- `cd backend && npx tsc --noEmit` — sem erros.
+- `grep` confirmando que `contato` só aparece em comentários explicativos e no código de `/proximos` (fora do escopo), nunca mais em `PerfilPublicoProfissional`/`PerfilProfissional`/perfil público.
+- Não foi possível testar a chamada real à BrasilAPI neste ambiente (sandbox sem acesso de rede a domínios externos) nem rodar `flutter run` — checagem só estática + revisão de tipos.
+- Mudanças commitadas em `git` (branch `main`), dois commits.
+
+### Pendências para a próxima sessão
+1. **Rodar as migrações `07_foto_cliente_portfolio.sql` e `08_cep_profissional.sql` no Neon** (e confirmar que as anteriores, 04–06, já foram aplicadas) — sem isso, o app quebra com "column/view does not exist".
+2. Testar de verdade a chamada à BrasilAPI a partir do backend rodando fora deste sandbox (ambiente do usuário tem rede de verdade) — confirmar que o formato de resposta bate com o que `cep.ts` espera (`location.coordinates.latitude/longitude` como string).
+3. Testar ponta a ponta: profissional edita perfil → digita CEP válido → salva → confere que aparece na busca do mapa (`/profissionais/proximos`) e que o "endereço de atuação" no perfil público bate com o CEP informado. Testar também um CEP inválido/inexistente (mensagem de erro amigável esperada).
+4. Confirmar visualmente que a foto do cliente aparece nos cards de avaliação do portfólio (depende de o cliente ter preenchido foto de perfil — ver sessão anterior).
+5. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
