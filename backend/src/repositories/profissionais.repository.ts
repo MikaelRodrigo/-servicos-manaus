@@ -19,7 +19,9 @@ export interface FiltroProximidade {
    * Filtro EXATO por subcategoria -- alimentado pelo `BuscaSubcategoriaAutocomplete`
    * do app (cliente escolhe da lista, nunca digita livre). Quando presente,
    * tem precedência sobre `profissao`: só entra quem tem exatamente essa
-   * subcategoria, sem aproximação nenhuma.
+   * subcategoria_id, OU (fallback) quem se cadastrou antes da migração 09 e
+   * tem o nome da subcategoria batendo no texto livre antigo -- ver
+   * comentário do WHERE em `buscarProximos`.
    */
   subcategoriaId?: number;
   limite: number;
@@ -126,8 +128,26 @@ export async function buscarProximos(
       )
 
       -- Filtro EXATO por subcategoria (o que o mapa usa de verdade hoje).
-      -- Sem aproximação: só entra quem tem exatamente essa subcategoria_id.
-      AND ($7::int IS NULL OR p.subcategoria_id = $7::int)
+      --
+      -- Com FALLBACK para profissionais cadastrados ANTES da migração 09
+      -- (subcategoria_id NULL -- só tinham o texto livre antigo em
+      -- profissao/categoria_atuacao). Sem este fallback, todo profissional
+      -- que se cadastrou antes da hierarquia categoria/subcategoria existir
+      -- SOME de qualquer busca filtrada por especialidade -- o filtro por ID
+      -- não tem como casar com quem nunca recebeu um ID. Aqui comparamos o
+      -- texto livre antigo contra o NOME da subcategoria pedida (mesma ideia
+      -- do filtro textual de $4 acima, só que restrita a quem não tem
+      -- subcategoria_id -- profissionais já migrados continuam usando SÓ o
+      -- match exato por ID, sem ambiguidade).
+      AND (
+        $7::int IS NULL
+        OR p.subcategoria_id = $7::int
+        OR (
+          p.subcategoria_id IS NULL
+          AND unaccent(lower(COALESCE(p.profissao, p.categoria_atuacao, '')))
+              LIKE '%' || unaccent(lower((SELECT sc2.nome FROM subcategorias sc2 WHERE sc2.subcategoria_id = $7::int))) || '%'
+        )
+      )
 
     ORDER BY p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
     LIMIT $5
