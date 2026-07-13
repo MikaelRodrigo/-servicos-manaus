@@ -101,3 +101,38 @@ Ao retomar, o repositório tinha uma quantidade grande de mudanças NÃO commita
 2. Testar ponta a ponta no Flutter de verdade (`flutter run`) — este ambiente não tem o SDK do Flutter, então a tela nova (`_GaleriaDeFotos` + botão "Útil") nunca foi executada de fato, só revisada estaticamente.
 3. Testar o fluxo completo: avaliar um profissional com várias fotos → abrir o perfil dele → ver a galeria deslizando → curtir/descurtir uma avaliação → conferir que o contador muda.
 4. Itens antigos ainda pendentes (não avançaram nesta sessão): Dockerfile do backend + trocar uploads em disco por armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
+---
+
+## Sessão de 12/07/2026 (continuação 2 — Perfil do cliente + endereço de atuação do profissional)
+
+### Pedido
+Cliente precisava de um perfil próprio (foto, dados pessoais visíveis, edição, endereço fixo). Profissional precisava de um campo de "endereço de atuação padrão" para dar ao cliente uma noção de onde ele atende, sem depender só do pino no mapa.
+
+### O que foi feito
+
+**Backend**
+- `database/06_perfil_cliente_endereco.sql` (nova migração) — `clientes.url_foto_perfil`, `clientes.endereco` (texto livre, não geocodificado) e `profissionais.endereco_atuacao` (também texto livre, só informativo — não entra no cálculo de distância, que continua vindo de latitude/longitude).
+- `backend/src/repositories/clientes.repository.ts` (novo) — espelha o padrão de `profissionais.repository.ts`: `buscarMeuPerfil(clienteId)` e `atualizarMeuPerfil(clienteId, dados)` com `COALESCE` para update parcial. Diferente do perfil público do profissional, aqui `email` é devolvido normalmente — a rota é sempre o próprio dono do token, sem risco de scraping.
+- `backend/src/routes/clientes.routes.ts` (novo) — `GET /clientes/me` e `PATCH /clientes/me` (multipart, campos `contato`/`endereco`/`foto_perfil`, todos opcionais mas ao menos um obrigatório), ambas atrás de `exigirAutenticacao` + `exigirPapel('cliente')`. Registrado em `app.ts` (`app.use('/clientes', clientesRouter)`).
+- `profissionais.repository.ts` / `profissionais.routes.ts` — `PerfilPublicoProfissional`, `buscarPerfilPublico`, `AtualizacaoPerfilProfissional` e `atualizarPerfilProfissional` passam a expor/aceitar `endereco_atuacao`. `PATCH /profissionais/me` aceita o novo campo (texto, até 500 caracteres).
+
+**Flutter**
+- `lib/data/models/perfil_cliente.dart` (novo) — model `PerfilCliente` espelhando `GET /clientes/me`.
+- `lib/data/services/clientes_service.dart` (novo) — `buscarMeuPerfil()` e `atualizarMeuPerfil(contato, endereco, foto)`.
+- `lib/screens/perfil_cliente_screen.dart` (novo) — visualização + edição na MESMA tela (diferente do profissional, que tem tela pública separada da tela de edição): foto (avatar tocável), nome/e-mail somente leitura, contato e endereço editáveis, botão salvar que só manda os campos que de fato mudaram.
+- `lib/screens/home_shell.dart` — ganhou 3ª aba "Perfil" na navegação inferior, visível **só para clientes** (o profissional já tem acesso à própria edição de perfil por outro caminho, então duplicar a aba seria redundante). Índice da aba atual é resetado com segurança se a lista de abas encolher.
+- `lib/data/models/perfil_profissional.dart`, `lib/data/services/profissionais_service.dart`, `lib/screens/editar_perfil_screen.dart`, `lib/screens/perfil_profissional_screen.dart` — todos ganharam suporte a `enderecoAtuacao`: campo no model, parâmetro no `atualizarMeuPerfil`, novo `TextField` na tela de edição, e exibição (ícone de localização) no perfil público.
+
+### Verificação feita
+- Balanceamento de chaves/parênteses/colchetes em todos os arquivos Dart novos/alterados (script Python) — todos OK.
+- `cd backend && npx tsc --noEmit` — sem erros.
+- Não foi possível rodar `flutter analyze`/`flutter run` neste ambiente (sem SDK Flutter instalado) — checagem só estática.
+- Mudanças commitadas em `git` (branch `main`).
+
+### Pendências para a próxima sessão
+1. **Rodar a migração `06_perfil_cliente_endereco.sql` no Neon** e reiniciar o backend — sem isso, `GET/PATCH /clientes/me` e o novo campo do profissional vão quebrar com "column does not exist".
+2. Testar ponta a ponta no Flutter de verdade: login como cliente → aba "Perfil" aparece → editar foto/contato/endereço → salvar → conferir persistência. Login como profissional → editar perfil → preencher "endereço de atuação" → abrir o próprio perfil público (ou pedir para outro usuário abrir) → conferir que aparece.
+3. Migrações `04` e `05` (sessões anteriores) — confirmar se já foram de fato aplicadas no Neon; se não, aplicar junto com a `06` na mesma sessão de banco.
+4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
