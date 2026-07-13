@@ -227,6 +227,20 @@ export function numeroDoBody(valor: unknown, campo: string): number {
   throw new ErroDeValidacao(`O campo "${campo}" deve ser um número.`);
 }
 
+/**
+ * Inteiro positivo vindo de BODY JSON -- ex.: `categoria_id`, `subcategoria_id`.
+ * Mesma ideia de `notaObrigatoria` (número inteiro + faixa), mas sem teto
+ * fixo: quem chama decide se o valor existe de verdade consultando o banco
+ * (a FK cuida disso -- ver `PG_FOREIGN_KEY_VIOLATION` em erros-postgres.ts).
+ */
+export function inteiroPositivoObrigatorio(valor: unknown, campo: string): number {
+  const n = numeroDoBody(valor, campo);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser um número inteiro positivo.`);
+  }
+  return n;
+}
+
 /** enum literal 'PF' | 'PJ' -- qualquer outra coisa é 400. */
 export function tipoPessoaObrigatorio(valor: unknown, campo = 'tipo_pessoa'): 'PF' | 'PJ' {
   if (valor !== 'PF' && valor !== 'PJ') {

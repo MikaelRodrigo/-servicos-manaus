@@ -24,6 +24,7 @@ export interface ProfissionalProximo {
   tipo_pessoa: 'PF' | 'PJ';
   nome_exibicao: string;
   atuacao: string | null;
+  categoria: string | null;
   email: string;
   contato: string;
   latitude: number;
@@ -61,8 +62,14 @@ export async function buscarProximos(
       p.tipo_pessoa,
 
       -- Custo do Single Table Design: PF tem "nome", PJ tem "razao_social".
-      COALESCE(p.nome, p.razao_social)            AS nome_exibicao,
-      COALESCE(p.profissao, p.categoria_atuacao)  AS atuacao,
+      COALESCE(p.nome, p.razao_social)      AS nome_exibicao,
+
+      -- Desde a migração 09, "atuacao" vem da subcategoria escolhida no
+      -- cadastro (via categoria_id/subcategoria_id), não mais de texto
+      -- livre. O nome da chave no JSON continua "atuacao" de propósito --
+      -- é o que o app Flutter já espera, não precisou mudar nada lá.
+      sc.nome                               AS atuacao,
+      c.nome                                AS categoria,
 
       p.email,
       p.contato,
@@ -77,9 +84,11 @@ export async function buscarProximos(
           p.localizacao,
           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
         )::numeric
-      , 2)::float8                                AS distancia_metros
+      , 2)::float8                          AS distancia_metros
 
     FROM profissionais p
+    LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
+    LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
 
     WHERE
       -- ST_DWithin é o predicado que o índice GIST consegue usar.
@@ -96,13 +105,16 @@ export async function buscarProximos(
       -- Profissional sem coordenada não entra no mapa.
       AND p.localizacao IS NOT NULL
 
-      -- Filtro opcional. Quando $4 é NULL, a condição inteira vira TRUE
-      -- e o filtro simplesmente não se aplica. Evita montar SQL dinâmico
-      -- com concatenação de string.
+      -- Filtro opcional (busca livre digitada pelo CLIENTE no mapa -- não
+      -- confundir com o cadastro do profissional, que não aceita mais
+      -- texto livre). Quando $4 é NULL, a condição inteira vira TRUE e o
+      -- filtro simplesmente não se aplica. Casa tanto contra a subcategoria
+      -- ("barbeiro") quanto contra a categoria ("beleza"), para quem digitar
+      -- o termo mais genérico.
       AND (
         $4::text IS NULL
-        OR unaccent(lower(COALESCE(p.profissao, p.categoria_atuacao)))
-             LIKE '%' || unaccent(lower($4::text)) || '%'
+        OR unaccent(lower(COALESCE(sc.nome, ''))) LIKE '%' || unaccent(lower($4::text)) || '%'
+        OR unaccent(lower(COALESCE(c.nome, '')))  LIKE '%' || unaccent(lower($4::text)) || '%'
       )
 
     ORDER BY p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
@@ -143,6 +155,7 @@ export interface PerfilPublicoProfissional {
   tipo_pessoa: 'PF' | 'PJ';
   nome_exibicao: string;
   atuacao: string | null;
+  categoria: string | null;
   descricao: string | null;
   url_foto_perfil: string | null;
   latitude: number | null;
@@ -158,17 +171,20 @@ export async function buscarPerfilPublico(
 ): Promise<PerfilPublicoProfissional | null> {
   const { rows } = await pool.query<PerfilPublicoProfissional>(
     `SELECT
-       profissional_id,
-       tipo_pessoa,
-       COALESCE(nome, razao_social)           AS nome_exibicao,
-       COALESCE(profissao, categoria_atuacao) AS atuacao,
-       descricao,
-       url_foto_perfil,
-       latitude,
-       longitude,
-       endereco_atuacao
-     FROM profissionais
-     WHERE profissional_id = $1`,
+       p.profissional_id,
+       p.tipo_pessoa,
+       COALESCE(p.nome, p.razao_social) AS nome_exibicao,
+       sc.nome                          AS atuacao,
+       c.nome                           AS categoria,
+       p.descricao,
+       p.url_foto_perfil,
+       p.latitude,
+       p.longitude,
+       p.endereco_atuacao
+     FROM profissionais p
+     LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
+     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+     WHERE p.profissional_id = $1`,
     [profissionalId],
   );
   return rows[0] ?? null;
@@ -208,24 +224,31 @@ export async function atualizarPerfilProfissional(
   dados: AtualizacaoPerfilProfissional,
 ): Promise<PerfilPublicoProfissional> {
   const { rows } = await pool.query<PerfilPublicoProfissional>(
-    `UPDATE profissionais
-        SET descricao        = COALESCE($2, descricao),
-            url_foto_perfil  = COALESCE($3, url_foto_perfil),
-            cep              = COALESCE($4, cep),
-            latitude         = COALESCE($5, latitude),
-            longitude        = COALESCE($6, longitude),
-            endereco_atuacao = COALESCE($7, endereco_atuacao)
-      WHERE profissional_id = $1
-      RETURNING
-        profissional_id,
-        tipo_pessoa,
-        COALESCE(nome, razao_social)           AS nome_exibicao,
-        COALESCE(profissao, categoria_atuacao) AS atuacao,
-        descricao,
-        url_foto_perfil,
-        latitude,
-        longitude,
-        endereco_atuacao`,
+    `WITH atualizado AS (
+       UPDATE profissionais
+          SET descricao        = COALESCE($2, descricao),
+              url_foto_perfil  = COALESCE($3, url_foto_perfil),
+              cep              = COALESCE($4, cep),
+              latitude         = COALESCE($5, latitude),
+              longitude        = COALESCE($6, longitude),
+              endereco_atuacao = COALESCE($7, endereco_atuacao)
+        WHERE profissional_id = $1
+        RETURNING *
+     )
+     SELECT
+       p.profissional_id,
+       p.tipo_pessoa,
+       COALESCE(p.nome, p.razao_social) AS nome_exibicao,
+       sc.nome                          AS atuacao,
+       c.nome                           AS categoria,
+       p.descricao,
+       p.url_foto_perfil,
+       p.latitude,
+       p.longitude,
+       p.endereco_atuacao
+     FROM atualizado p
+     LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
+     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id`,
     [
       profissionalId,
       dados.descricao ?? null,

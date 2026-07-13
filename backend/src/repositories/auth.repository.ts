@@ -127,7 +127,9 @@ export interface DadosProfissionalPF {
   nome: string;
   cpf: string;
   dataNascimento: string;
-  profissao?: string;
+  /** IDs de categorias/subcategorias.repository.ts (migração 09) -- sempre juntos, sempre obrigatórios. */
+  categoriaId: number;
+  subcategoriaId: number;
   latitude?: number;
   longitude?: number;
 }
@@ -138,7 +140,9 @@ export interface DadosProfissionalPJ {
   contato: string;
   razaoSocial: string;
   cnpj: string;
-  categoriaAtuacao?: string;
+  /** IDs de categorias/subcategorias.repository.ts (migração 09) -- sempre juntos, sempre obrigatórios. */
+  categoriaId: number;
+  subcategoriaId: number;
   dataCriacao?: string;
   latitude?: number;
   longitude?: number;
@@ -149,8 +153,8 @@ export async function criarProfissionalPF(
 ): Promise<{ id: string }> {
   const { rows } = await pool.query<{ profissional_id: string }>(
     `INSERT INTO profissionais
-       (tipo_pessoa, email, senha_hash, contato, nome, cpf, data_nascimento, profissao, latitude, longitude)
-     VALUES ('PF', $1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (tipo_pessoa, email, senha_hash, contato, nome, cpf, data_nascimento, categoria_id, subcategoria_id, latitude, longitude)
+     VALUES ('PF', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING profissional_id`,
     [
       dados.email,
@@ -159,7 +163,8 @@ export async function criarProfissionalPF(
       dados.nome,
       dados.cpf,
       dados.dataNascimento,
-      dados.profissao ?? null,
+      dados.categoriaId,
+      dados.subcategoriaId,
       dados.latitude ?? null,
       dados.longitude ?? null,
     ],
@@ -172,8 +177,8 @@ export async function criarProfissionalPJ(
 ): Promise<{ id: string }> {
   const { rows } = await pool.query<{ profissional_id: string }>(
     `INSERT INTO profissionais
-       (tipo_pessoa, email, senha_hash, contato, razao_social, cnpj, categoria_atuacao, data_criacao, latitude, longitude)
-     VALUES ('PJ', $1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (tipo_pessoa, email, senha_hash, contato, razao_social, cnpj, categoria_id, subcategoria_id, data_criacao, latitude, longitude)
+     VALUES ('PJ', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING profissional_id`,
     [
       dados.email,
@@ -181,7 +186,8 @@ export async function criarProfissionalPJ(
       dados.contato,
       dados.razaoSocial,
       dados.cnpj,
-      dados.categoriaAtuacao ?? null,
+      dados.categoriaId,
+      dados.subcategoriaId,
       dados.dataCriacao ?? null,
       dados.latitude ?? null,
       dados.longitude ?? null,
