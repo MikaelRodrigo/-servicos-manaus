@@ -1,10 +1,21 @@
 # Serviços Manaus
 
-API de serviços geolocalizados focada em Manaus/AM. Conecta clientes a profissionais próximos por meio de um mapa interativo, com um sistema de avaliação bilateral (cliente avalia profissional e vice-versa).
+App de serviços geolocalizados focado em Manaus/AM. Conecta clientes a profissionais próximos por meio de um mapa interativo, com perfil público de cada profissional (foto, descrição, avaliações, portfólio de serviços concluídos) e um sistema de avaliação bilateral (cliente avalia profissional e vice-versa).
 
-**Stack:** Node.js · TypeScript · Express · PostgreSQL + PostGIS (hospedado no Neon) · Flutter (mobile, em desenvolvimento).
+**Stack:** Node.js · TypeScript · Express · PostgreSQL + PostGIS (hospedado no Neon) · Flutter (Android/iOS/Web).
 
 > **Novo no projeto?** Veja **[`CONTRIBUTING.md`](./CONTRIBUTING.md)** para o guia completo de setup (backend + app Flutter) e **[`PROGRESSO.md`](./PROGRESSO.md)** para o histórico de sessões e pendências atuais.
+
+## Funcionalidades
+
+- **Mapa de profissionais próximos** — busca por proximidade (PostGIS `ST_DWithin`) com filtro por profissão/categoria.
+- **Cadastro e login** — clientes e profissionais são entidades separadas (podem inclusive compartilhar e-mail), autenticação via JWT.
+- **Localização por CEP** — o profissional informa apenas o CEP; o backend resolve endereço (ViaCEP) e coordenadas (Nominatim/OpenStreetMap, com fallback progressivo rua → bairro → cidade) automaticamente.
+- **Perfil público do profissional** — foto, descrição, médias de avaliação por critério (técnico/comportamental/econômico) e portfólio de serviços concluídos.
+- **Perfil do cliente** — foto, contato e endereço, editáveis pelo próprio cliente.
+- **Avaliações com fotos e curtidas** — cliente avalia o serviço com até 5 fotos; outros usuários podem curtir ("Útil") uma avaliação. A foto de perfil do cliente aparece junto do comentário no portfólio do profissional.
+- **Ciclo de vida de um serviço** — solicitar → aceitar/recusar → iniciar → concluir/cancelar, com regras por papel (cliente/profissional).
+- **Privacidade** — o backend nunca expõe e-mail ou telefone de terceiros em rotas públicas (perfil público do profissional, por exemplo).
 
 ---
 
@@ -42,7 +53,7 @@ git clone <URL_DO_REPOSITORIO>
 cd projetos-servicos-manaus/backend
 ```
 
-### 2. Instalar as dependências
+### 2. Instalar as dependências do backend
 
 ```bash
 npm install
@@ -97,6 +108,18 @@ Deixe esse terminal aberto — é o servidor rodando. Para parar, aperte `Ctrl+C
 
 > A primeira conexão pode demorar alguns segundos: o banco no Neon "dorme" quando não está em uso e precisa acordar.
 
+### 5. Rodar o app Flutter
+
+Com o backend no ar, em outro terminal:
+
+```bash
+cd app
+flutter pub get
+flutter run -d chrome
+```
+
+`flutter run -d chrome` é o jeito mais simples de testar (funciona em qualquer máquina, sem emulador). Para rodar num emulador/celular Android, veja `lib/core/config/api_config.dart` — o endereço da API muda conforme a plataforma (emulador Android usa `10.0.2.2`, não `localhost`); já está tratado no código.
+
 ---
 
 ## Testando a API
@@ -132,22 +155,40 @@ http://localhost:3333/profissionais/proximos?latitude=-3.13013&longitude=-60.023
 
 ```
 projetos-servicos-manaus/
-├── database/                        # Scripts SQL do banco
-│   ├── 01_schema.sql                # Tabelas, índices, views, triggers
-│   └── 02_seed_teste.sql            # Dados de exemplo (Manaus)
+├── database/                        # Migrações SQL, em ordem (01, 02, 03...)
+│   ├── 01_schema_2.sql               # Tabelas, índices, views, triggers (schema base)
+│   ├── 02_seed_teste_1.sql           # Dados de exemplo (Manaus)
+│   ├── 03_auth_alter.sql             # Colunas de autenticação (senha com hash)
+│   ├── 04_perfil_profissional.sql    # descricao / url_foto_perfil do profissional
+│   ├── 05_avaliacoes_fotos_curtidas.sql  # Múltiplas fotos por avaliação + curtidas
+│   ├── 06_perfil_cliente_endereco.sql    # Perfil do cliente (foto/endereço) + endereço de atuação
+│   ├── 07_foto_cliente_portfolio.sql     # Foto do cliente exposta no portfólio do profissional
+│   └── 08_cep_profissional.sql           # Coluna cep + localização automática via CEP
 │
-└── backend/                         # API Node + TypeScript
-    ├── src/
-    │   ├── server.ts                # Ponto de entrada
-    │   ├── app.ts                   # Configuração do Express e middlewares
-    │   ├── database.ts              # Pool de conexão com o Postgres/Neon
-    │   ├── env.ts                   # Leitura e validação das variáveis de ambiente
-    │   ├── routes/                  # Rotas HTTP
-    │   ├── repositories/            # Acesso ao banco (queries SQL)
-    │   └── utils/                   # Validação de entrada e helpers
-    ├── .env.example                 # Modelo de configuração (sem senha)
-    ├── package.json
-    └── tsconfig.json
+├── backend/                         # API Node + TypeScript
+│   ├── src/
+│   │   ├── server.ts                # Ponto de entrada
+│   │   ├── app.ts                   # Configuração do Express e middlewares
+│   │   ├── database.ts              # Pool de conexão com o Postgres/Neon
+│   │   ├── env.ts                   # Leitura e validação das variáveis de ambiente
+│   │   ├── routes/                  # Rotas HTTP (validação de entrada)
+│   │   ├── repositories/            # Acesso ao banco (toda query SQL mora aqui)
+│   │   ├── services/                # Chamadas a APIs externas (ex.: geocodificação de CEP)
+│   │   ├── middlewares/             # Autenticação (JWT) e upload de arquivos
+│   │   └── utils/                   # Validação de entrada e helpers
+│   ├── .env.example                 # Modelo de configuração (sem senha)
+│   ├── package.json
+│   └── tsconfig.json
+│
+└── app/                              # App Flutter (Android / iOS / Web)
+    └── lib/
+        ├── main.dart                 # Ponto de entrada
+        ├── core/config/              # Configuração da API (URL base por plataforma)
+        ├── data/
+        │   ├── models/                # Modelos que espelham as respostas da API
+        │   └── services/              # Camada HTTP (um service por recurso)
+        ├── providers/                 # Estado da aplicação (auth, localização, etc.)
+        └── screens/                   # Telas
 ```
 
 ---
@@ -156,7 +197,7 @@ projetos-servicos-manaus/
 
 O banco roda no **Neon** (PostgreSQL na nuvem) com a extensão **PostGIS** para consultas geoespaciais.
 
-Se precisar recriar o banco do zero (em um projeto Neon novo, por exemplo), rode no SQL Editor do Neon, nesta ordem:
+Se precisar recriar o banco do zero (em um projeto Neon novo, por exemplo), rode no SQL Editor do Neon (ou via `psql`) os arquivos de `database/` **em ordem numérica, um de cada vez**:
 
 1. Ative as extensões:
    ```sql
@@ -164,8 +205,11 @@ Se precisar recriar o banco do zero (em um projeto Neon novo, por exemplo), rode
    CREATE EXTENSION IF NOT EXISTS pgcrypto;
    CREATE EXTENSION IF NOT EXISTS unaccent;
    ```
-2. Rode o conteúdo de `database/01_schema.sql` (cria as tabelas).
-3. Opcional: rode `database/02_seed_teste.sql` para inserir dados de exemplo.
+2. `01_schema_2.sql` — cria as tabelas, índices, views e triggers (schema base).
+3. `02_seed_teste_1.sql` — opcional, dados de exemplo.
+4. `03_auth_alter.sql` a `08_cep_profissional.sql` — evoluções incrementais (auth, perfil público, avaliações com fotos/curtidas, perfil do cliente, CEP/geolocalização). Veja o cabeçalho de cada arquivo para o que ele muda.
+
+> Se o banco do time já está rodando há um tempo, só as migrações mais recentes que ainda faltam precisam ser aplicadas — confira `PROGRESSO.md` para saber até qual número já foi rodado no Neon.
 
 ---
 
