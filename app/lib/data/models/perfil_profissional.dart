@@ -84,11 +84,14 @@ class ResumoAvaliacoes {
 /// `avaliacaoId` (não `idServico`) é o identificador usado para curtir --
 /// ver `ProfissionaisService.curtirAvaliacao`. `urlsFotos` é sempre uma
 /// lista (nunca null): pode vir vazia quando o cliente não anexou foto
-/// nenhuma na avaliação.
+/// nenhuma na avaliação. `urlFotoCliente` (migração 07) é a foto de PERFIL
+/// do cliente que avaliou -- diferente de `urlsFotos`, que são as fotos DO
+/// SERVIÇO anexadas na avaliação.
 class ItemPortfolio {
   final String idServico;
   final String avaliacaoId;
   final String nomeCliente;
+  final String? urlFotoCliente;
   final String? comentario;
   final List<String> urlsFotos;
   final int estrelasTecnico;
@@ -104,6 +107,7 @@ class ItemPortfolio {
     required this.idServico,
     required this.avaliacaoId,
     required this.nomeCliente,
+    required this.urlFotoCliente,
     required this.comentario,
     required this.urlsFotos,
     required this.estrelasTecnico,
@@ -121,6 +125,7 @@ class ItemPortfolio {
       idServico: json['id_servico'] as String,
       avaliacaoId: json['avaliacao_id'] as String,
       nomeCliente: json['nome_cliente'] as String,
+      urlFotoCliente: json['url_foto_cliente'] as String?,
       comentario: json['comentario'] as String?,
       urlsFotos: (json['urls_fotos'] as List<dynamic>? ?? const [])
           .map((item) => item as String)

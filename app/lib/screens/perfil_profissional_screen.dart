@@ -428,29 +428,36 @@ class _CartaoPortfolioState extends State<_CartaoPortfolio> {
     final item = widget.item;
     final corDestaque = Theme.of(context).colorScheme.primary;
     final inicial = item.nomeCliente.trim().isNotEmpty ? item.nomeCliente.trim()[0].toUpperCase() : '?';
+    final urlFotoCliente = ApiConfig.urlAbsoluta(item.urlFotoCliente);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Linha 1: avatar (iniciais -- não temos foto de cliente) + nome
-          // + data à esquerda, botão "Útil" à direita. Mesma posição da
-          // Shopee: avatar/usuário e "Útil" na mesma altura, no topo.
+          // Linha 1: avatar + nome + data à esquerda, botão "Útil" à
+          // direita. Mesma posição da Shopee: avatar/usuário e "Útil" na
+          // mesma altura, no topo. Avatar usa a FOTO DE PERFIL DO CLIENTE
+          // (`clientes.url_foto_perfil`, exposta pela view desde a
+          // migração 07) quando o cliente tiver preenchido uma -- senão
+          // cai no mesmo fallback de sempre: iniciais do nome.
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
                 radius: 16,
                 backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                child: Text(
-                  inicial,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
+                backgroundImage: urlFotoCliente != null ? NetworkImage(urlFotoCliente) : null,
+                child: urlFotoCliente == null
+                    ? Text(
+                        inicial,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      )
+                    : null,
               ),
               const SizedBox(width: 10),
               Expanded(

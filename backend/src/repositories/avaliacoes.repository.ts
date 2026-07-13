@@ -179,7 +179,7 @@ export async function buscarAvaliacaoClientePorServico(
 // PORTFÓLIO PÚBLICO do profissional (GET /profissionais/:id/portfolio)
 // ---------------------------------------------------------------------------
 
-/** Espelha as colunas da view vw_historico_portifolio (Seção 3 da migração 05). */
+/** Espelha as colunas da view vw_historico_portifolio (migração 05, com `url_foto_cliente` adicionado na migração 07). */
 export interface ItemDePortfolio {
   profissional_id: string;
   id_servico: string;
@@ -187,6 +187,7 @@ export interface ItemDePortfolio {
   cliente_id: string;
   nome_cliente: string;
   tipo_cliente: 'PF' | 'PJ';
+  url_foto_cliente: string | null;
   comentario: string | null;
   urls_fotos: string[];
   estrelas_tecnico: number;
