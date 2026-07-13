@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 // `hide Path`: o pacote latlong2 também exporta uma classe chamada `Path`
@@ -153,40 +155,51 @@ class _MapaScreenState extends State<MapaScreen> {
 
     if (!mounted) return;
 
-    // Reenquadra a câmera para caber TODO o resultado (usuário + cada
-    // profissional retornado) -- é a correção do bug relatado: "aumentar
+    // Reenquadra a câmera pelo CÍRCULO do raio escolhido (não mais pelos
+    // pontos dos resultados) -- requisito: "sempre que um raio for
+    // selecionado ou alterado, a câmera deve se centralizar no usuário e o
+    // zoom deve se ajustar para que o círculo fique bem visível e
+    // centralizado". Também é a correção do bug relatado antes: "aumentar
     // o raio parece substituir a lista em vez de somar". A causa real não
     // era o backend (ST_DWithin já é cumulativo por natureza -- "distância
     // <= raio", ver o comentário grande em profissionais.repository.ts):
     // era o mapa manter o MESMO zoom fixo (14) de sempre, então pinos que
     // só entram no resultado com um raio maior nasciam fora da área
     // visível na tela -- pareciam ter sumido, mas na verdade nunca tinham
-    // chegado a aparecer.
-    _ajustarCameraParaResultados(LatLng(latitude, longitude), provider.resultados);
+    // chegado a aparecer. Enquadrar pelo círculo (em vez de pelos
+    // profissionais retornados) resolve isso de vez: como a busca já é uma
+    // "cerca" exata (`distância <= raio`), todo profissional no resultado
+    // está, por construção, dentro do círculo -- então caber o círculo
+    // inteiro na tela também garante caber todos eles, mesmo quando a
+    // lista vem vazia (situação em que não haveria pontos de resultado
+    // para basear um enquadramento).
+    _ajustarCameraParaRaio(LatLng(latitude, longitude), _raioSelecionado.km * 1000);
   }
 
-  /// Ver comentário em `_buscar` acima -- sem isto, o raio podia crescer
-  /// sem o mapa nunca "abrir" o suficiente pra mostrar quem entrou de novo.
-  void _ajustarCameraParaResultados(LatLng centro, List<Profissional> resultados) {
-    final pontos = <LatLng>[
-      centro,
-      for (final p in resultados) LatLng(p.latitude, p.longitude),
-    ];
+  /// Ver comentário em `_buscar` acima. Calcula a "caixa" (bounding box) do
+  /// círculo do raio -- centro ± raio convertido de metros para graus -- e
+  /// pede pro `fitCamera` enquadrar exatamente essa área. Sempre tem área
+  /// > 0 (o menor raio possível é 2km), então, ao contrário da versão
+  /// anterior baseada nos resultados, não precisa de um caso especial para
+  /// "nenhum profissional encontrado".
+  ///
+  /// A conversão metros -> graus é uma aproximação (Terra tratada como
+  /// esfera perfeita), suficiente para enquadrar câmera -- não é usada em
+  /// nenhum cálculo de distância real (isso continua 100% no backend, via
+  /// PostGIS/`ST_DWithin`, que é exato).
+  void _ajustarCameraParaRaio(LatLng centro, double raioMetros) {
+    const metrosPorGrauDeLatitude = 111320.0;
+    final grausDeLatitude = raioMetros / metrosPorGrauDeLatitude;
+    final grausDeLongitude =
+        raioMetros / (metrosPorGrauDeLatitude * math.cos(centro.latitude * math.pi / 180));
 
-    if (pontos.length == 1) {
-      // Ninguém no raio -- só centraliza no usuário. Um `LatLngBounds` de
-      // um ponto só teria área zero, e o cálculo de zoom do `fitCamera`
-      // pode virar `Infinity`/`NaN` nesse caso -- por isso o fallback
-      // separado aqui em vez de deixar o `fitCamera` lidar com isso.
-      _mapController.move(centro, 14);
-      return;
-    }
+    final bounds = LatLngBounds.fromPoints([
+      LatLng(centro.latitude + grausDeLatitude, centro.longitude + grausDeLongitude),
+      LatLng(centro.latitude - grausDeLatitude, centro.longitude - grausDeLongitude),
+    ]);
 
     _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: LatLngBounds.fromPoints(pontos),
-        padding: const EdgeInsets.all(48),
-      ),
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(32)),
     );
   }
 
@@ -239,6 +252,11 @@ class _MapaScreenState extends State<MapaScreen> {
     final usuario = context.watch<AuthProvider>().usuario;
 
     final posicaoAtual = localizacao.posicao;
+
+    // Cor do círculo do raio -- puxa do tema central (ver core/theme/app_theme.dart)
+    // em vez de fixar uma cor aqui, pra ficar automaticamente consistente com o
+    // resto da identidade visual do app (e acompanhar se o tema mudar no futuro).
+    final corRaio = Theme.of(context).colorScheme.primary;
 
     final marcadores = <Marker>[
       if (posicaoAtual != null)
@@ -397,6 +415,49 @@ class _MapaScreenState extends State<MapaScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
                 ),
+
+                // Círculo do raio de busca -- puramente visual (overlay), nunca
+                // participa da consulta em si: o filtro de verdade continua sendo
+                // o `ST_DWithin` do backend (ver profissionais.repository.ts). Este
+                // círculo só representa, na tela, a mesma "cerca" que o backend já
+                // está aplicando -- se algum dia os dois divergirem é bug de UI, não
+                // de busca.
+                //
+                // Fica ANTES do `MarkerLayer` de propósito: assim o preenchimento
+                // translúcido desenha por baixo dos pinos dos profissionais, nunca
+                // por cima escondendo-os.
+                //
+                // `TweenAnimationBuilder` sozinho, sem `AnimationController`
+                // manual: ele detecta a troca de `_raioSelecionado.km` a cada
+                // rebuild e anima o valor atual do raio (em metros) suavemente até
+                // o novo alvo -- é o que faz o círculo "crescer"/"encolher" ao
+                // trocar de 2km pra 15km, em vez de saltar de um tamanho pro outro.
+                if (posicaoAtual != null)
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: _raioSelecionado.km * 1000),
+                    duration: const Duration(milliseconds: 450),
+                    curve: Curves.easeInOut,
+                    builder: (context, raioAnimadoEmMetros, child) {
+                      return CircleLayer(
+                        circles: [
+                          CircleMarker(
+                            point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
+                            radius: raioAnimadoEmMetros,
+                            useRadiusInMeter: true,
+                            // Preenchimento suave e translúcido...
+                            color: corRaio.withValues(alpha: 0.16),
+                            // ...com borda na MESMA cor, mas bem menos transparente --
+                            // o contraste de opacidade entre preenchimento e borda é o
+                            // que dá a leitura de "borda levemente mais escura
+                            // delimitando o raio", sem precisar de uma segunda cor.
+                            borderColor: corRaio.withValues(alpha: 0.65),
+                            borderStrokeWidth: 2,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
                 MarkerLayer(markers: marcadores),
                 // Créditos ao OpenStreetMap -- também exigido pela política
                 // de uso deles. Nunca remova isto de um app que usa os
