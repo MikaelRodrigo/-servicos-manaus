@@ -27,6 +27,13 @@ class ProfissionaisService {
     /// `'melhores_avaliados'` -- ver `ordenar_por` em
     /// profissionais.routes.ts no backend. `null` equivale a `'distancia'`.
     String? ordenarPor,
+    /// Quantos profissionais no máximo devolver (padrão do backend: 20,
+    /// teto: 500 -- ver comentário em profissionais.routes.ts). O mapa
+    /// passa um valor bem mais alto que o padrão de propósito: ele quer
+    /// mostrar TODO MUNDO dentro do raio escolhido (um "cerco" geográfico),
+    /// não uma página de 20 em 20 -- sem isso, aumentar o raio poderia
+    /// silenciosamente cortar profissionais mais distantes.
+    int? limite,
   }) async {
     final resposta = await _api.get(
       '/profissionais/proximos',
@@ -38,6 +45,7 @@ class ProfissionaisService {
         if (profissao != null && profissao.isNotEmpty) 'profissao': profissao,
         if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
         if (ordenarPor != null) 'ordenar_por': ordenarPor,
+        if (limite != null) 'limite': limite,
       },
     );
 

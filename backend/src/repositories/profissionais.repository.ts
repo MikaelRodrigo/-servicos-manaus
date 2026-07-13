@@ -171,6 +171,21 @@ export async function buscarProximos(
       --
       -- NÃO troque por "WHERE ST_Distance(...) < raio". Funciona, dá o mesmo
       -- resultado, e ignora o índice: vira Seq Scan na tabela toda.
+      --
+      -- IMPORTANTE (confirmado na documentação do PostGIS): ST_DWithin é
+      -- "distância <= raio", não "< raio" -- ou seja, já é INCLUSIVO na
+      -- borda, e cada chamada desta função roda de novo contra a tabela
+      -- INTEIRA de profissionais (não existe estado entre uma busca e
+      -- outra, não há como "esquecer" quem já apareceu antes). Isso
+      -- significa que aumentar o raio (2km -> 5km) É, por construção,
+      -- cumulativo: TODO profissional que satisfazia "distância <= 2000"
+      -- também satisfaz "distância <= 5000" -- não existe caminho no SQL
+      -- para alguém "sumir" ao crescer o raio. Se um profissional que
+      -- aparecia num raio menor parecer sumir num raio maior, a causa
+      -- não está aqui -- ver "_ajustarCameraParaResultados" no
+      -- "mapa_screen.dart" (o zoom fixo do mapa não acompanhava o raio, e
+      -- pinos fora da área visível pareciam ter desaparecido sem terem
+      -- desaparecido de verdade).
       ST_DWithin(
         p.localizacao,
         ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,

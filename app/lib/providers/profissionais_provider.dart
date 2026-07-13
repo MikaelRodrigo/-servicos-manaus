@@ -20,6 +20,7 @@ class ProfissionaisProvider extends ChangeNotifier {
     String? profissao,
     int? subcategoriaId,
     String? ordenarPor,
+    int? limite,
   }) async {
     _carregando = true;
     _erro = null;
@@ -33,6 +34,7 @@ class ProfissionaisProvider extends ChangeNotifier {
         profissao: profissao,
         subcategoriaId: subcategoriaId,
         ordenarPor: ordenarPor,
+        limite: limite,
       );
     } on ApiException catch (erro) {
       _erro = erro.mensagem;

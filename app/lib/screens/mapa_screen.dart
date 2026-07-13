@@ -25,6 +25,15 @@ import 'perfil_profissional_screen.dart';
 /// meio do Oceano Atlântico, em 0,0, antes do GPS responder).
 const _centroManaus = LatLng(-3.130130, -60.023400);
 
+/// Quantos profissionais no máximo pedir ao backend por busca -- bem acima
+/// do padrão da API (20) de propósito. O mapa mostra um "cerco" geográfico
+/// (todo mundo dentro do raio escolhido), não uma lista paginada; um teto
+/// baixo demais cortaria silenciosamente quem está mais longe dentro do
+/// próprio raio à medida que a base de profissionais cresce -- ver
+/// comentário completo em profissionais.routes.ts sobre o teto do backend
+/// ter sido levantado de 100 para 500 especificamente para esta rota.
+const _limiteDeProfissionaisNoMapa = 200;
+
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
 /// não mandar o parâmetro, que já é o padrão "distancia" no backend). São os
@@ -132,13 +141,53 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 
   Future<void> _buscar(double latitude, double longitude) async {
-    await context.read<ProfissionaisProvider>().buscarProximos(
-          latitude: latitude,
-          longitude: longitude,
-          raioKm: _raioSelecionado.km,
-          subcategoriaId: _subcategoriaSelecionada?.id,
-          ordenarPor: _ordenacaoSelecionada.valorApi,
-        );
+    final provider = context.read<ProfissionaisProvider>();
+    await provider.buscarProximos(
+      latitude: latitude,
+      longitude: longitude,
+      raioKm: _raioSelecionado.km,
+      subcategoriaId: _subcategoriaSelecionada?.id,
+      ordenarPor: _ordenacaoSelecionada.valorApi,
+      limite: _limiteDeProfissionaisNoMapa,
+    );
+
+    if (!mounted) return;
+
+    // Reenquadra a câmera para caber TODO o resultado (usuário + cada
+    // profissional retornado) -- é a correção do bug relatado: "aumentar
+    // o raio parece substituir a lista em vez de somar". A causa real não
+    // era o backend (ST_DWithin já é cumulativo por natureza -- "distância
+    // <= raio", ver o comentário grande em profissionais.repository.ts):
+    // era o mapa manter o MESMO zoom fixo (14) de sempre, então pinos que
+    // só entram no resultado com um raio maior nasciam fora da área
+    // visível na tela -- pareciam ter sumido, mas na verdade nunca tinham
+    // chegado a aparecer.
+    _ajustarCameraParaResultados(LatLng(latitude, longitude), provider.resultados);
+  }
+
+  /// Ver comentário em `_buscar` acima -- sem isto, o raio podia crescer
+  /// sem o mapa nunca "abrir" o suficiente pra mostrar quem entrou de novo.
+  void _ajustarCameraParaResultados(LatLng centro, List<Profissional> resultados) {
+    final pontos = <LatLng>[
+      centro,
+      for (final p in resultados) LatLng(p.latitude, p.longitude),
+    ];
+
+    if (pontos.length == 1) {
+      // Ninguém no raio -- só centraliza no usuário. Um `LatLngBounds` de
+      // um ponto só teria área zero, e o cálculo de zoom do `fitCamera`
+      // pode virar `Infinity`/`NaN` nesse caso -- por isso o fallback
+      // separado aqui em vez de deixar o `fitCamera` lidar com isso.
+      _mapController.move(centro, 14);
+      return;
+    }
+
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(pontos),
+        padding: const EdgeInsets.all(48),
+      ),
+    );
   }
 
   /// Chamado quando a pessoa escolhe (ou remove) uma especialidade no

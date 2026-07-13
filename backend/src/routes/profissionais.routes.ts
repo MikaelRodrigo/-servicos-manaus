@@ -97,7 +97,18 @@ profissionaisRouter.get(
       }
 
       const pagina = entre(numeroOpcional(req.query.pagina, 'pagina', 1), 1, 1000, 'pagina');
-      const limite = entre(numeroOpcional(req.query.limite, 'limite', 20), 1, 100, 'limite');
+
+      // Teto bem mais alto que o normal (outras rotas paginadas ficam em
+      // 100) porque este é o único caso onde "página cortada" pode passar
+      // a impressão de bug de filtro: o mapa quer mostrar TODO MUNDO
+      // dentro do raio escolhido (é um "cerco" geográfico, não uma lista
+      // navegável) -- se alguém aumenta o raio de 2km pra 15km e o número
+      // de profissionais na área passa de 100, o antigo teto cortaria os
+      // mais distantes silenciosamente, e pareceria que a busca "esqueceu"
+      // gente que devia continuar aparecendo. Ainda ASSIM tem teto (500,
+      // não ilimitado) -- e continua barato, porque `ST_DWithin` já reduz
+      // o universo de linhas ANTES do LIMIT entrar em jogo.
+      const limite = entre(numeroOpcional(req.query.limite, 'limite', 20), 1, 500, 'limite');
 
       /* ---------------------------------------------------------------
          PASSO 2 - CONVERTER para o que o domínio entende.
