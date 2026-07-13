@@ -488,3 +488,38 @@ Só afeta o alvo Web — Android (UCrop) e iOS (TOCropViewController) usam imple
 1. **Confirmar com o usuário** que o recorte responde a arraste/zoom depois desse fix (pode precisar reiniciar `flutter run`, não só hot reload, já que `index.html` é carregado uma vez no boot da página).
 2. Testar o mesmo fluxo em Android/iOS (não deveriam ser afetados por este bug, que era só do Web, mas vale confirmar que continuam funcionando).
 3. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`).
+
+---
+
+## Sessão de 13/07/2026 (continuação — filtros avançados: raio de proximidade + ordenação por avaliação)
+
+### Pedido
+Sistema avançado de filtros na busca do cliente: (1) filtro de raio de proximidade com opções 1/2/3/4/5 km, recalculando distância via Haversine entre GPS do usuário e cada profissional; (2) filtro de ordenação por avaliação multicritério ("Melhor Custo-Benefício" vs "Melhores Avaliados"), com o sistema de avaliação descrito como baseado em três critérios (Custo-Benefício, Pontualidade, Qualidade); (3) chips reativos abaixo da busca principal, atualizando mapa/lista instantaneamente; (4) estética clean consistente com o redesign.
+
+### Descobertas antes de implementar
+- **O raio já era configurável no backend** desde sempre (`raio_km`, PostGIS `ST_DWithin`/`ST_Distance` sobre `geography`, que já calcula distância geodésica real — o próprio Postgres/PostGIS faz o equivalente a Haversine internamente, de forma mais precisa que uma fórmula manual). O que faltava era só o Flutter deixar de mandar um valor fixo (`raioKm: 10`, hardcoded em `mapa_screen.dart`) e virar uma escolha do usuário.
+- **Os critérios de avaliação do schema são outros**: `avaliacoes_profissional` (migração 01) tem `estrelas_tecnico`/`estrelas_comportamental`/`estrelas_economico` — não "Custo-Benefício/Pontualidade/Qualidade" como descrito no pedido. Não existe "pontualidade" em lugar nenhum do banco. Mapeamento adotado (comunicado no commit e aqui): "econômico" (preço justo pelo serviço) é o mais próximo em significado de "custo-benefício"; "média geral" (os três critérios juntos) atende "Melhores Avaliados". Como o filtro pedido só precisava de DOIS critérios de ordenação (não dos três), não foi necessário criar uma migração nova para "pontualidade" — ficaria fora de escopo; fica registrado aqui caso o usuário queira esse critério de verdade no futuro.
+
+### O que foi feito
+
+**Backend**
+- `profissionais.repository.ts`: `buscarProximos` ganhou `ordenarPor` (`'distancia' | 'melhor_custo_beneficio' | 'melhores_avaliados'`). As médias de avaliação são pré-agregadas numa ÚNICA subquery (`GROUP BY profissional_id`) e juntadas via `LEFT JOIN` — uma passada só pela tabela de avaliações para TODOS os profissionais do raio, não uma consulta de média por pino (evita N+1, mesmo espírito da contagem por subcategoria da sessão anterior). O `ORDER BY` é montado a partir de uma lista fechada de cláusulas SQL prontas (`ORDENS_VALIDAS`), nunca por concatenação direta do que o usuário mandou — os placeholders parametrizados de sempre ($1-$7) continuam intactos.
+- `profissionais.routes.ts`: novo query param `ordenar_por`, validado contra lista fechada (`ORDENACOES_VALIDAS`, 400 se valor inválido). `raio_km` não precisou de nenhuma mudança de validação (já aceitava de 0.1 até `RAIO_MAXIMO_KM`).
+
+**Flutter**
+- `profissional.dart`: `Profissional` ganha `mediaCustoBeneficio`/`mediaGeral` (nullable — `null` quando ainda não há avaliação, nunca `0`).
+- `profissionais_service.dart`/`profissionais_provider.dart`: `buscarProximos` aceita `ordenarPor`, repassado até a query string.
+- `mapa_screen.dart`: dois grupos de `ChoiceChip` logo abaixo da barra de busca — raio (1/2/3/4/5 km, ícone de régua) e ordenação (Mais próximos / Melhor custo-benefício / Melhores avaliados, ícone de ordenar). Reativo: mudar qualquer um dos dois rebusca na hora (mesmo padrão de `_aoMudarSubcategoria`, sem botão "aplicar"). Estilo herdado do `ChipTheme` global já configurado no redesign — sem overrides locais, mantendo a identidade visual.
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros.
+- Balanceamento de chaves/parênteses/colchetes (script Python) nos 4 arquivos Dart tocados — OK.
+- **Corrupção de mount de novo** (mesmo bug recorrente): os 6 arquivos (2 backend + 4 Flutter) vieram truncados no mount depois das edições — todos reescritos por inteiro via heredoc a partir do conteúdo autoritativo, reconferidos (`wc -l`/`file` batendo com o esperado) antes de compilar/commitar.
+- `git diff --stat` conferido antes do commit — só os 6 arquivos esperados, tamanhos batendo com a mudança pretendida.
+- Commit `dc60fa5` (6 arquivos, 201 inserções/5 remoções).
+- **Não foi possível testar contra o banco real** (sandbox sem acesso de rede à Neon) — a lógica do `LEFT JOIN`/`GROUP BY`/`ORDER BY` dinâmico foi revisada manualmente linha a linha, mas o comportamento e a performance reais só podem ser confirmados rodando no Neon com dados de verdade.
+
+### Pendências para a próxima sessão
+1. Testar de verdade no Flutter: trocar o raio e a ordenação no mapa, conferir que a lista de pinos muda na hora e que "Melhor custo-benefício"/"Melhores avaliados" ordenam como esperado (e que profissionais sem avaliação nenhuma aparecem por último, não em primeiro por causa de `NULL`).
+2. Se "Pontualidade" for de fato um critério que o usuário quer ver refletido nas avaliações (não só um rótulo alternativo para "comportamental"), é uma migração nova: nova coluna `estrelas_pontualidade` em `avaliacoes_profissional`, mais os ajustes correspondentes na tela de avaliação e nos resumos exibidos no perfil.
+3. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); confirmar fix do cropper.js no Web.
