@@ -339,3 +339,38 @@ Como é um app Flutter (não CSS web), "global" foi resolvido com um `ThemeData`
 2. Considerar adicionar a fonte Inter/Poppins via pacote `google_fonts` **num ambiente com acesso de rede/toolchain completo** — não foi feito aqui de propósito, pois este sandbox não consegue verificar se o pacote resolve/compila (ficou só com a Roboto padrão do Flutter + `TextTheme` customizado).
 3. Migrações `07` a `09` seguem pendentes de rodar no Neon (itens antigos, não relacionados ao redesign).
 4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
+### Atualização: emulador Android voltou a funcionar
+Nesta mesma sessão (via Android Studio, ver seção abaixo), o emulador Pixel 7 (API 37.1) **bootou normalmente e rodou o app sem o crash nativo (ART)** relatado em sessões anteriores — não precisou de cold boot nem de nenhum contorno especial. O item "emulador Android com crash nativo" acima pode estar resolvido (talvez uma atualização do Android Studio/SDK entre sessões tenha corrigido); vale confirmar de novo se o problema reaparecer.
+
+---
+
+## Sessão de 13/07/2026 (continuação — testar redesign no Android Studio + corrigir filtro de subcategoria)
+
+### Pedido
+1. Rodar o app no Android Studio para visualizar o redesign numa interface de dispositivo móvel de verdade (não só Chrome web).
+2. Bug relatado pelo usuário: "O sistema não está mais conseguindo filtrar os profissionais depois que colocamos o filtro inteligente e as subcategorias 'pai e filhas'".
+
+### Parte 1 — Rodando no Android Studio
+- Projeto aberto em `app/` no Android Studio; plugin Flutter não estava instalado (`Configure plugins...` → instalar → Restart IDE) — depois disso o projeto passou a ser reconhecido como Flutter de verdade.
+- `flutter pub get` rodado pela própria IDE — "Got dependencies!" sem erro.
+- Tentativa em "Windows (desktop)" falhou: `Unable to find suitable Visual Studio toolchain` (falta o workload de C++ do Visual Studio na máquina). Tentativa em "Chrome (web)" funcionou, mas não serve para ver a interface como dispositivo móvel.
+- **Emulador Android Pixel 7 (API 37.1)**, já configurado no Device Manager, foi iniciado e **bootou sem o crash nativo (ART)** documentado em sessões anteriores — rodou o app normalmente (`flutter run` → Gradle `assembleDebug` → instalação do APK). Redesign confirmado visualmente: campos arredondados sem borda pesada, seletor cliente/profissional em pílula, botão de destaque arredondado, bom espaçamento — bateu com as 6 diretrizes pedidas na sessão do redesign.
+
+### Parte 2 — Bug do filtro de subcategoria
+**Diagnóstico:** revisão de código completa da cadeia (Flutter `BuscaSubcategoriaAutocomplete` → `mapa_screen.dart` → `ProfissionaisService`/`ApiClient` → rota `GET /profissionais/proximos` → validação → `buscarProximos` no repository → SQL) não encontrou nenhum bug lógico — todo o encadeamento estava correto e consistente. A causa raiz é um problema de **dado, não de código**: profissionais cadastrados **antes** da migração 09 (hierarquia categoria/subcategoria) — incluindo o seed de teste `02_seed_teste_1.sql`, que usa só o campo antigo `profissao` — ficaram com `subcategoria_id = NULL`. O filtro EXATO `p.subcategoria_id = $7` não tinha como casar com eles, então qualquer busca filtrada por especialidade os excluía por completo (mesmo aparecendo normalmente no mapa sem filtro nenhum).
+
+**Correção** (`backend/src/repositories/profissionais.repository.ts`, função `buscarProximos`): o filtro de subcategoria ganhou um FALLBACK — quando `p.subcategoria_id IS NULL` (profissional pré-migração 09), compara o texto livre antigo (`profissao`/`categoria_atuacao`) contra o NOME da subcategoria pedida, com o mesmo `LIKE` já usado no filtro textual legado (`$4`). Profissionais já migrados (com `subcategoria_id` preenchido) continuam usando só o match exato por ID, sem ambiguidade nenhuma.
+
+### Verificação feita
+- Revisão de código completa de toda a cadeia Flutter → backend antes de escrever qualquer linha (para não "consertar" algo que já estava certo).
+- `cd backend && npx tsc --noEmit` — sem erros.
+- `git diff` conferido linha a linha antes do commit — só a mudança pretendida (23 inserções, 3 remoções).
+- Commit `2f18c4c`.
+- **Não foi possível confirmar contra o banco real** (sandbox sem acesso de rede à Neon) se o problema é exatamente esse ou se as migrações 07-09 nunca chegaram a rodar em produção (pendência antiga, repetida em quase toda sessão) — o fallback cobre AMBOS os cenários prováveis relacionados a dado legado, mas se a rota inteira estiver retornando 500 (colunas/tabelas não existirem de verdade no banco), a causa é outra (migração não aplicada) e este fix sozinho não resolve.
+
+### Pendências para a próxima sessão
+1. **Confirmar no ambiente real do usuário** se o filtro por especialidade volta a mostrar profissionais antigos depois deste fix. Se a busca continuar vazia (ou der erro 500), o suspeito nº 1 passa a ser as migrações `07`/`08`/`09` nunca aplicadas no Neon — item pendente há várias sessões, ver seções anteriores.
+2. Rodar as migrações `07` a `09` no Neon (segue sem confirmação de que foi feito).
+3. Investigar por que "Windows (desktop)" não builda (`Unable to find suitable Visual Studio toolchain`) — instalar o workload "Desktop development with C++" do Visual Studio Build Tools, se um dia for necessário rodar como app desktop nativo.
+4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real.
