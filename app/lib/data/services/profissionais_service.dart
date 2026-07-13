@@ -35,7 +35,8 @@ class ProfissionaisService {
   }
 
   /// GET /profissionais/:id -- perfil público completo (foto, descrição,
-  /// atuação, contato). Alimenta o topo da tela de perfil.
+  /// atuação, endereço de atuação). Alimenta o topo da tela de perfil.
+  /// NÃO inclui contato -- ver comentário no backend (profissionais.repository.ts).
   Future<PerfilProfissional> buscarPerfilPublico(String profissionalId) async {
     final resposta = await _api.get(
       '/profissionais/$profissionalId',
@@ -93,22 +94,26 @@ class ProfissionaisService {
   }
 
   /// PATCH /profissionais/me -- o PRÓPRIO profissional logado edita seu
-  /// perfil público (descrição, endereço de atuação e/ou foto). Todos
-  /// opcionais -- mas ao menos um precisa vir, senão o backend recusa
-  /// com 400 (não faz sentido um PATCH que não muda nada).
+  /// perfil público (descrição, CEP e/ou foto). Todos opcionais -- mas ao
+  /// menos um precisa vir, senão o backend recusa com 400 (não faz sentido
+  /// um PATCH que não muda nada).
+  ///
+  /// `cep` (8 dígitos) é geocodificado NO BACKEND: o servidor define
+  /// latitude/longitude e o endereço de atuação a partir dele -- o app não
+  /// calcula nem envia coordenada nenhuma aqui, só o CEP.
   ///
   /// `foto` é `XFile?` (image_picker), igual ao padrão já usado em
   /// `AvaliacoesService.avaliarProfissional` -- funciona em mobile e web.
   Future<PerfilProfissional> atualizarMeuPerfil({
     String? descricao,
-    String? enderecoAtuacao,
+    String? cep,
     XFile? foto,
   }) async {
     final resposta = await _api.patchMultipart(
       '/profissionais/me',
       campos: {
         if (descricao != null) 'descricao': descricao,
-        if (enderecoAtuacao != null) 'endereco_atuacao': enderecoAtuacao,
+        if (cep != null) 'cep': cep,
       },
       bytesArquivo: foto != null ? await foto.readAsBytes() : null,
       nomeArquivo: foto?.name,

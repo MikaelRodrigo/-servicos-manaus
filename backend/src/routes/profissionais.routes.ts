@@ -5,6 +5,7 @@ import {
   numeroObrigatorio,
   numeroOpcional,
   textoOpcional,
+  apenasDigitos,
   entre,
   uuidObrigatorio,
   ErroNaoEncontrado,
@@ -13,6 +14,7 @@ import {
 import { buscarPortifolio, buscarResumoDeAvaliacoes } from '../repositories/avaliacoes.repository';
 import { exigirAutenticacao, exigirPapel, autenticacaoOpcional } from '../middlewares/autenticacao';
 import { uploadFotoPerfil, urlPublicaDoArquivoPerfil } from '../middlewares/upload';
+import { buscarLocalizacaoPorCep } from '../services/cep';
 
 export const profissionaisRouter = Router();
 
@@ -116,17 +118,21 @@ profissionaisRouter.get(
 /* ============================================================================
    PATCH /profissionais/me -- PRIVADA (exige login, só "profissional").
 
-   Edita o PRÓPRIO perfil público: descrição ("sobre mim") e/ou foto de
-   perfil. Repare que não existe `:id` na URL -- de propósito. O profissional
-   editado é sempre `req.usuario.sub` (quem está logado), nunca um ID
-   escolhido no corpo da request. Isso elimina de saída qualquer risco de um
-   profissional editar o perfil de outro só trocando um ID no JSON.
+   Edita o PRÓPRIO perfil público: descrição ("sobre mim"), CEP (que define
+   onde o profissional aparece no mapa) e/ou foto de perfil. Repare que não
+   existe `:id` na URL -- de propósito. O profissional editado é sempre
+   `req.usuario.sub` (quem está logado), nunca um ID escolhido no corpo da
+   request. Isso elimina de saída qualquer risco de um profissional editar
+   o perfil de outro só trocando um ID no JSON.
 
    Content-Type: multipart/form-data
    Campos (todos opcionais, mas ao menos um precisa vir):
-     descricao        (texto, até 2000 caracteres)
-     endereco_atuacao (texto, até 500 caracteres -- região/endereço padrão de atuação, só informativo)
-     foto_perfil      (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
+     descricao   (texto, até 2000 caracteres)
+     cep         (texto, 8 dígitos) -- geocodificado nesta rota: define
+                 latitude/longitude (o que alimenta a busca por proximidade
+                 do mapa) e substitui endereco_atuacao pelo endereço
+                 formatado que a geocodificação devolveu.
+     foto_perfil (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
 
    É rota PATCH, não POST: estamos atualizando um recurso que já existe (o
    cadastro do profissional), não criando um novo.
@@ -139,19 +145,39 @@ profissionaisRouter.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const descricao = textoOpcional(req.body.descricao, 'descricao', 2000);
-      const enderecoAtuacao = textoOpcional(req.body.endereco_atuacao, 'endereco_atuacao', 500);
       const urlFotoPerfil = req.file ? urlPublicaDoArquivoPerfil(req.file) : undefined;
 
-      if (descricao === undefined && enderecoAtuacao === undefined && urlFotoPerfil === undefined) {
+      // CEP é opcional (o campo pode não vir no request), mas QUANDO vem,
+      // precisa ter exatamente 8 dígitos -- mesma convenção de `contato`
+      // no cadastro (ver auth.routes.ts).
+      const cepBruto =
+        req.body.cep !== undefined && req.body.cep !== null && req.body.cep !== ''
+          ? apenasDigitos(req.body.cep, 'cep', 8)
+          : undefined;
+
+      if (descricao === undefined && cepBruto === undefined && urlFotoPerfil === undefined) {
         throw new ErroDeValidacao(
-          'Envie ao menos "descricao", "endereco_atuacao" ou uma foto ("foto_perfil") para atualizar.',
+          'Envie ao menos "descricao", "cep" ou uma foto ("foto_perfil") para atualizar.',
         );
+      }
+
+      // `cep`, `latitude`, `longitude` e `enderecoAtuacao` só existem
+      // JUNTOS: um único CEP gera as quatro informações de uma vez, via
+      // geocodificação (ver services/cep.ts). Se `cepBruto` não veio,
+      // nenhum dos quatro é passado adiante -- o COALESCE no repository
+      // mantém tudo como já estava.
+      let localizacao: { latitude: number; longitude: number; enderecoFormatado: string } | undefined;
+      if (cepBruto !== undefined) {
+        localizacao = await buscarLocalizacaoPorCep(cepBruto);
       }
 
       const perfilAtualizado = await atualizarPerfilProfissional(req.usuario!.sub, {
         descricao,
         urlFotoPerfil,
-        enderecoAtuacao,
+        cep: cepBruto,
+        latitude: localizacao?.latitude,
+        longitude: localizacao?.longitude,
+        enderecoAtuacao: localizacao?.enderecoFormatado,
       });
 
       return res.json(perfilAtualizado);
@@ -164,8 +190,10 @@ profissionaisRouter.patch(
 /* ============================================================================
    GET /profissionais/:id -- PÚBLICA (sem login).
 
-   Perfil público completo: foto, descrição, atuação, contato. É a tela que
-   abre quando o cliente toca no pino do profissional no mapa.
+   Perfil público completo: foto, descrição, atuação, endereço de atuação.
+   NÃO inclui contato (telefone/WhatsApp) -- ver comentário em
+   `PerfilPublicoProfissional` no repository. É a tela que abre quando o
+   cliente toca no pino do profissional no mapa.
 
    IMPORTANTE sobre ordem de rotas no Express: esta rota usa `:id`, que
    casa com QUALQUER segmento único de URL. Ela só pode ficar registrada

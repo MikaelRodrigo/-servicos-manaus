@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
@@ -8,10 +9,11 @@ import '../data/services/api_client.dart';
 import '../data/services/profissionais_service.dart';
 import '../providers/auth_provider.dart';
 
-/// Tela em que o PRÓPRIO profissional edita seu perfil público: foto e
-/// descrição ("sobre mim"). É o que alimenta os campos que antes ficavam
-/// sempre `null` -- sem esta tela, ninguém teria como preencher
-/// `descricao`/`url_foto_perfil` depois do cadastro.
+/// Tela em que o PRÓPRIO profissional edita seu perfil público: foto,
+/// descrição ("sobre mim") e CEP. É o que alimenta os campos que antes
+/// ficavam sempre `null` -- sem esta tela, ninguém teria como preencher
+/// `descricao`/`url_foto_perfil` depois do cadastro, nem aparecer na busca
+/// por proximidade do mapa (que depende de latitude/longitude).
 class EditarPerfilScreen extends StatefulWidget {
   const EditarPerfilScreen({super.key});
 
@@ -21,12 +23,19 @@ class EditarPerfilScreen extends StatefulWidget {
 
 class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   final _descricaoController = TextEditingController();
-  final _enderecoAtuacaoController = TextEditingController();
+  final _cepController = TextEditingController();
   late Future<PerfilProfissional> _futuroPerfilAtual;
 
   XFile? _fotoEscolhida;
   Uint8List? _bytesFotoEscolhida;
   String? _urlFotoAtual;
+
+  // Localização/endereço JÁ GRAVADOS -- mostrados como texto informativo
+  // ("Localização atual: ..."), nunca pré-preenchidos no campo de CEP. O
+  // campo de CEP é só de ENTRADA (mesmo espírito do seletor de foto: ele
+  // não mostra a foto atual dentro do próprio botão de escolher foto nova,
+  // mostra ao lado). Evita reenviar sempre o mesmo CEP sem querer.
+  String? _enderecoAtualExibicao;
   bool _salvando = false;
 
   @override
@@ -38,8 +47,8 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
       if (!mounted) return;
       setState(() {
         _descricaoController.text = perfil.descricao ?? '';
-        _enderecoAtuacaoController.text = perfil.enderecoAtuacao ?? '';
         _urlFotoAtual = perfil.urlFotoPerfil;
+        _enderecoAtualExibicao = perfil.enderecoAtuacao;
       });
     });
   }
@@ -47,7 +56,7 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   @override
   void dispose() {
     _descricaoController.dispose();
-    _enderecoAtuacaoController.dispose();
+    _cepController.dispose();
     super.dispose();
   }
 
@@ -88,13 +97,22 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
 
   Future<void> _salvar() async {
     final descricao = _descricaoController.text.trim();
-    final enderecoAtuacao = _enderecoAtuacaoController.text.trim();
+    final cep = _cepController.text.trim();
 
-    if (descricao.isEmpty && enderecoAtuacao.isEmpty && _fotoEscolhida == null) {
+    if (descricao.isEmpty && cep.isEmpty && _fotoEscolhida == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Altere a descrição, o endereço de atuação ou escolha uma foto antes de salvar.'),
+          content: Text('Altere a descrição, informe um CEP ou escolha uma foto antes de salvar.'),
         ),
+      );
+      return;
+    }
+
+    // Confere 8 dígitos ANTES de bater no backend -- feedback imediato em
+    // vez de esperar a resposta de um CEP obviamente incompleto/errado.
+    if (cep.isNotEmpty && cep.length != 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('O CEP precisa ter 8 dígitos.')),
       );
       return;
     }
@@ -103,12 +121,22 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
     try {
       final perfilAtualizado = await ProfissionaisService.instancia.atualizarMeuPerfil(
         descricao: descricao.isNotEmpty ? descricao : null,
-        enderecoAtuacao: enderecoAtuacao.isNotEmpty ? enderecoAtuacao : null,
+        cep: cep.isNotEmpty ? cep : null,
         foto: _fotoEscolhida,
       );
       if (!mounted) return;
+      setState(() {
+        _enderecoAtualExibicao = perfilAtualizado.enderecoAtuacao;
+        _cepController.clear();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Perfil atualizado!')),
+        SnackBar(
+          content: Text(
+            cep.isNotEmpty && perfilAtualizado.enderecoAtuacao != null
+                ? 'Perfil atualizado! Localização: ${perfilAtualizado.enderecoAtuacao}'
+                : 'Perfil atualizado!',
+          ),
+        ),
       );
       Navigator.of(context).pop(perfilAtualizado);
     } on ApiException catch (erro) {
@@ -183,17 +211,37 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
               ),
               const SizedBox(height: 16),
 
+              // CEP define onde o profissional aparece na busca por
+              // proximidade do mapa -- ver PATCH /profissionais/me no
+              // backend, que geocodifica o CEP em latitude/longitude.
               TextField(
-                controller: _enderecoAtuacaoController,
-                maxLines: 2,
-                maxLength: 500,
+                controller: _cepController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                maxLength: 8,
                 decoration: const InputDecoration(
-                  labelText: 'Endereço de atuação padrão',
-                  hintText: 'Ex.: Atende na zona Centro-Sul, próximo ao Shopping X...',
+                  labelText: 'CEP',
+                  hintText: 'Ex.: 69010030',
+                  helperText: 'Define onde você aparece no mapa para os clientes.',
                   border: OutlineInputBorder(),
-                  alignLabelWithHint: true,
                 ),
               ),
+              if (_enderecoAtualExibicao != null && _enderecoAtualExibicao!.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.location_on_outlined, size: 16, color: Colors.grey.shade600),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Localização atual: $_enderecoAtualExibicao',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 12),
 
               FilledButton.icon(

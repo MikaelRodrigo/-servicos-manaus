@@ -127,7 +127,17 @@ export async function buscarProximos(
   return rows;
 }
 
-/** Perfil público completo -- a "carteira de visitas" que o app mostra ao tocar num pino do mapa. */
+/**
+ * Perfil público completo -- a "carteira de visitas" que o app mostra ao
+ * tocar num pino do mapa.
+ *
+ * Repare que nem `email` NEM `contato` estão aqui -- de propósito. Um
+ * perfil público serve para o cliente decidir se contrata; ele não precisa
+ * do telefone do profissional para isso (o pedido de serviço acontece pelo
+ * próprio app, via "Solicitar serviço"). Expor telefone/e-mail numa rota
+ * pública sem autenticação é só dar de graça material para bots de spam
+ * raspar a base inteira -- ligação indesejada é pior que e-mail de spam.
+ */
 export interface PerfilPublicoProfissional {
   profissional_id: string;
   tipo_pessoa: 'PF' | 'PJ';
@@ -135,7 +145,6 @@ export interface PerfilPublicoProfissional {
   atuacao: string | null;
   descricao: string | null;
   url_foto_perfil: string | null;
-  contato: string;
   latitude: number | null;
   longitude: number | null;
   endereco_atuacao: string | null;
@@ -143,12 +152,6 @@ export interface PerfilPublicoProfissional {
 
 /**
  * Busca os dados públicos de UM profissional, para a tela de perfil.
- *
- * Repare que `email` NÃO está na lista de colunas -- de propósito. Um
- * perfil público serve para o cliente decidir se contrata, e para isso o
- * `contato` (telefone/WhatsApp) já basta. Expor e-mail em uma rota pública
- * sem autenticação é só dar de graça material para bots de spam raspar a
- * base inteira.
  */
 export async function buscarPerfilPublico(
   profissionalId: string,
@@ -161,7 +164,6 @@ export async function buscarPerfilPublico(
        COALESCE(profissao, categoria_atuacao) AS atuacao,
        descricao,
        url_foto_perfil,
-       contato,
        latitude,
        longitude,
        endereco_atuacao
@@ -172,18 +174,28 @@ export async function buscarPerfilPublico(
   return rows[0] ?? null;
 }
 
-/** O que a rota de edição entrega. `undefined` num campo = "não mexa nele". */
+/**
+ * O que a rota de edição entrega. `undefined` num campo = "não mexa nele".
+ *
+ * `cep`, `latitude`, `longitude` e `enderecoAtuacao` sempre chegam JUNTOS
+ * (ou todos `undefined`, ou todos preenchidos) -- são o resultado de UMA
+ * consulta de geocodificação feita pela rota (ver `buscarLocalizacaoPorCep`
+ * em services/cep.ts) antes de chamar esta função. O repository não sabe
+ * nada sobre CEP nem sobre a API externa -- só grava o que já chegou pronto.
+ */
 export interface AtualizacaoPerfilProfissional {
   descricao?: string;
   urlFotoPerfil?: string;
+  cep?: string;
+  latitude?: number;
+  longitude?: number;
   enderecoAtuacao?: string;
 }
 
 /**
- * Atualiza `descricao` e/ou `url_foto_perfil` de UM profissional -- sempre o
- * DONO DO TOKEN (o `:id` nem existe nesta função; a rota só chama isto com
- * `req.usuario.sub`). Não existe caminho para um profissional editar o
- * perfil de outro.
+ * Atualiza o perfil de UM profissional -- sempre o DONO DO TOKEN (o `:id`
+ * nem existe nesta função; a rota só chama isto com `req.usuario.sub`). Não
+ * existe caminho para um profissional editar o perfil de outro.
  *
  * `COALESCE($2, descricao)`: se `dados.descricao` for `undefined` (o campo
  * não veio no request), o parâmetro vira SQL `NULL`, e o COALESCE mantém o
@@ -199,7 +211,10 @@ export async function atualizarPerfilProfissional(
     `UPDATE profissionais
         SET descricao        = COALESCE($2, descricao),
             url_foto_perfil  = COALESCE($3, url_foto_perfil),
-            endereco_atuacao = COALESCE($4, endereco_atuacao)
+            cep              = COALESCE($4, cep),
+            latitude         = COALESCE($5, latitude),
+            longitude        = COALESCE($6, longitude),
+            endereco_atuacao = COALESCE($7, endereco_atuacao)
       WHERE profissional_id = $1
       RETURNING
         profissional_id,
@@ -208,11 +223,18 @@ export async function atualizarPerfilProfissional(
         COALESCE(profissao, categoria_atuacao) AS atuacao,
         descricao,
         url_foto_perfil,
-        contato,
         latitude,
         longitude,
         endereco_atuacao`,
-    [profissionalId, dados.descricao ?? null, dados.urlFotoPerfil ?? null, dados.enderecoAtuacao ?? null],
+    [
+      profissionalId,
+      dados.descricao ?? null,
+      dados.urlFotoPerfil ?? null,
+      dados.cep ?? null,
+      dados.latitude ?? null,
+      dados.longitude ?? null,
+      dados.enderecoAtuacao ?? null,
+    ],
   );
   return rows[0];
 }

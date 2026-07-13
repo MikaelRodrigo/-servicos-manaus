@@ -1,10 +1,11 @@
 /// Espelha GET /profissionais/:id (ver `buscarPerfilPublico` no backend).
 ///
 /// É o "cartão de visitas" completo do profissional -- o que aparece quando
-/// o cliente toca no pino dele no mapa. Repare que NÃO existe campo `email`
-/// aqui: a rota pública nunca devolve isso (ver comentário no repository do
-/// backend sobre spam/scraping). Quem precisar falar com o profissional usa
-/// o `contato` (telefone/WhatsApp).
+/// o cliente toca no pino dele no mapa. Repare que NÃO existem campos
+/// `email` NEM `contato` aqui: a rota pública nunca devolve isso (ver
+/// comentário no repository do backend sobre spam/scraping). O pedido de
+/// serviço acontece pelo próprio app ("Solicitar serviço"), sem precisar
+/// do telefone do profissional.
 class PerfilProfissional {
   final String id;
   final String tipoPessoa; // 'PF' ou 'PJ'
@@ -12,7 +13,6 @@ class PerfilProfissional {
   final String? atuacao;
   final String? descricao;
   final String? urlFotoPerfil;
-  final String contato;
   final double? latitude;
   final double? longitude;
   final String? enderecoAtuacao;
@@ -24,7 +24,6 @@ class PerfilProfissional {
     required this.atuacao,
     required this.descricao,
     required this.urlFotoPerfil,
-    required this.contato,
     required this.latitude,
     required this.longitude,
     required this.enderecoAtuacao,
@@ -38,7 +37,6 @@ class PerfilProfissional {
       atuacao: json['atuacao'] as String?,
       descricao: json['descricao'] as String?,
       urlFotoPerfil: json['url_foto_perfil'] as String?,
-      contato: json['contato'] as String,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       enderecoAtuacao: json['endereco_atuacao'] as String?,
