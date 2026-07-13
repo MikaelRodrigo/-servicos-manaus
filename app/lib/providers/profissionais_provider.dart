@@ -18,6 +18,7 @@ class ProfissionaisProvider extends ChangeNotifier {
     required double longitude,
     double raioKm = 5,
     String? profissao,
+    int? subcategoriaId,
   }) async {
     _carregando = true;
     _erro = null;
@@ -29,6 +30,7 @@ class ProfissionaisProvider extends ChangeNotifier {
         longitude: longitude,
         raioKm: raioKm,
         profissao: profissao,
+        subcategoriaId: subcategoriaId,
       );
     } on ApiException catch (erro) {
       _erro = erro.mensagem;

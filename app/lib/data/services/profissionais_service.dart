@@ -11,11 +11,18 @@ class ProfissionaisService {
 
   final _api = ApiClient.instancia;
 
+  /// `subcategoriaId` é o filtro EXATO alimentado pelo
+  /// `BuscaSubcategoriaAutocomplete` (o cliente escolhe da lista, nunca
+  /// digita livre) -- ver `subcategoria_id` em profissionais.repository.ts
+  /// no backend. `profissao` continua existindo por compatibilidade (busca
+  /// textual antiga), mas a tela do mapa não usa mais os dois ao mesmo
+  /// tempo.
   Future<List<Profissional>> buscarProximos({
     required double latitude,
     required double longitude,
     double raioKm = 5,
     String? profissao,
+    int? subcategoriaId,
   }) async {
     final resposta = await _api.get(
       '/profissionais/proximos',
@@ -25,6 +32,7 @@ class ProfissionaisService {
         'longitude': longitude,
         'raio_km': raioKm,
         if (profissao != null && profissao.isNotEmpty) 'profissao': profissao,
+        if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
       },
     );
 

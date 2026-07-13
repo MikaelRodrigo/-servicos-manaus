@@ -8,11 +8,15 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
+import '../data/models/categoria.dart';
 import '../data/models/profissional.dart';
 import '../data/models/usuario.dart';
+import '../data/services/api_client.dart';
+import '../data/services/categorias_service.dart';
 import '../providers/auth_provider.dart';
 import '../providers/localizacao_provider.dart';
 import '../providers/profissionais_provider.dart';
+import '../widgets/busca_subcategoria_autocomplete.dart';
 import 'editar_perfil_screen.dart';
 import 'perfil_profissional_screen.dart';
 
@@ -30,21 +34,32 @@ class MapaScreen extends StatefulWidget {
 
 class _MapaScreenState extends State<MapaScreen> {
   final _mapController = MapController();
-  final _profissaoController = TextEditingController();
+
+  // Busca por especialidade -- ver BuscaSubcategoriaAutocomplete. Carregada
+  // uma única vez (não a cada busca no mapa, não a cada tecla digitada).
+  List<Categoria> _categorias = [];
+  Subcategoria? _subcategoriaSelecionada;
 
   @override
   void initState() {
     super.initState();
+    _carregarCategorias();
     // `addPostFrameCallback` porque não dá para chamar `context.read` (que
     // dispara `notifyListeners`) durante o `initState` -- o Flutter ainda
     // está no meio da construção da árvore de widgets nesse momento.
     WidgetsBinding.instance.addPostFrameCallback((_) => _atualizarLocalizacaoEBuscar());
   }
 
-  @override
-  void dispose() {
-    _profissaoController.dispose();
-    super.dispose();
+  Future<void> _carregarCategorias() async {
+    try {
+      final categorias = await CategoriasService.instancia.listarCategorias();
+      if (!mounted) return;
+      setState(() => _categorias = categorias);
+    } on ApiException {
+      // Falha silenciosa de propósito: sem a lista, o campo de busca por
+      // especialidade simplesmente fica sem opções -- o mapa em si (que já
+      // buscou por localização) continua funcionando normalmente.
+    }
   }
 
   Future<void> _atualizarLocalizacaoEBuscar() async {
@@ -69,8 +84,19 @@ class _MapaScreenState extends State<MapaScreen> {
           latitude: latitude,
           longitude: longitude,
           raioKm: 10,
-          profissao: _profissaoController.text.trim(),
+          subcategoriaId: _subcategoriaSelecionada?.id,
         );
+  }
+
+  /// Chamado quando a pessoa escolhe (ou remove) uma especialidade no
+  /// `BuscaSubcategoriaAutocomplete` -- rebusca automaticamente com o novo
+  /// filtro, sem precisar de um botão "aplicar" separado.
+  void _aoMudarSubcategoria(Subcategoria? subcategoria) {
+    setState(() => _subcategoriaSelecionada = subcategoria);
+    final posicao = context.read<LocalizacaoProvider>().posicao;
+    if (posicao != null) {
+      _buscar(posicao.latitude, posicao.longitude);
+    }
   }
 
   /// Toca no pino -> vai direto para o perfil público do profissional
@@ -149,21 +175,13 @@ class _MapaScreenState extends State<MapaScreen> {
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _profissaoController,
-                    decoration: const InputDecoration(
-                      hintText: 'Filtrar por profissão (ex: eletricista)',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onSubmitted: (_) {
-                      if (posicaoAtual != null) {
-                        _buscar(posicaoAtual.latitude, posicaoAtual.longitude);
-                      }
-                    },
+                  child: BuscaSubcategoriaAutocomplete(
+                    categorias: _categorias,
+                    subcategoriaSelecionada: _subcategoriaSelecionada,
+                    onSelecionada: _aoMudarSubcategoria,
                   ),
                 ),
                 const SizedBox(width: 8),

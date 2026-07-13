@@ -115,7 +115,7 @@ export async function buscarProximos(
 
       -- Filtro textual livre (legado -- mantido por compatibilidade, mas o
       -- app não digita mais texto solto: ver BuscaSubcategoriaAutocomplete,
-      -- que só manda `subcategoria_id` exato, filtrado abaixo). Quando $4 é
+      -- que só manda subcategoria_id exato, filtrado abaixo). Quando $4 é
       -- NULL, a condição inteira vira TRUE e o filtro não se aplica. Casa
       -- tanto contra a subcategoria ("barbeiro") quanto contra a categoria
       -- ("beleza"), para quem digitar o termo mais genérico.
