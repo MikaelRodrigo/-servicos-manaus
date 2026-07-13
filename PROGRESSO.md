@@ -460,3 +460,31 @@ Em vez de uma tabela de contagem mantida por trigger (sugerida como opção no p
 ### Pendências para a próxima sessão
 1. Testar de verdade no Flutter: digitar no campo de busca do mapa e conferir que cada sugestão mostra "(N)" corretamente, com N batendo com a quantidade real de profissionais daquela subcategoria no banco.
 2. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); testar fluxo de recorte de foto de perfil numa máquina com Flutter/rede.
+
+---
+
+## Sessão de 13/07/2026 (continuação — corrigir recorte de foto que não respondia no Flutter Web)
+
+### Pedido
+Usuário testou o recorte de foto no Chrome web (rodando de fato, pela primeira vez desde que a feature foi implementada) e reportou: o modal "Crop Image" aparece normalmente, mas arrastar a imagem para reposicionar e o slider de zoom não fazem nada.
+
+### Diagnóstico
+Pesquisa confirmou que o `image_cropper` usa, no alvo Web, a biblioteca JS **Cropper.js** para implementar o arraste/zoom de verdade — o modal em si (título, imagem, slider, botões) é desenhado pelo plugin em Dart e aparece de qualquer jeito, mas os `<link>`/`<script>` do Cropper.js precisam ser adicionados manualmente em `web/index.html` (documentado no README do pacote, mas não fazia parte do pubspec/scaffold do Flutter). Sem eles, o Cropper.js nunca é carregado, então os controles ficam visíveis só que sem nenhum handler de evento — exatamente o sintoma relatado.
+
+### O que foi feito
+`app/web/index.html` — adicionadas as duas tags exigidas pelo pacote, dentro do `<head>`:
+```html
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+```
+Só afeta o alvo Web — Android (UCrop) e iOS (TOCropViewController) usam implementação nativa própria, sem depender dessa biblioteca JS.
+
+### Verificação feita
+- `git diff` conferido — só as 13 linhas esperadas (mesmo padrão CRLF do resto do arquivo, restaurado com `sed -i 's/$/\r/'` depois da reescrita via heredoc, já que o mount truncou o arquivo no meio de uma palavra depois da primeira edição — mesmo bug recorrente de sempre).
+- Commit `b0e904e`.
+- **Não testável neste sandbox** (sem Flutter/Chrome real aqui) — depende do usuário recarregar a página (`flutter run -d chrome` de novo, ou refresh se o hot reload não pegar mudança em `index.html`) e confirmar que arrastar/zoom passam a responder.
+
+### Pendências para a próxima sessão
+1. **Confirmar com o usuário** que o recorte responde a arraste/zoom depois desse fix (pode precisar reiniciar `flutter run`, não só hot reload, já que `index.html` é carregado uma vez no boot da página).
+2. Testar o mesmo fluxo em Android/iOS (não deveriam ser afetados por este bug, que era só do Web, mas vale confirmar que continuam funcionando).
+3. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`).
