@@ -401,3 +401,33 @@ Usuário considerou o fix anterior (fallback textual dentro de `buscarProximos`)
 2. Depois de rodar, conferir a saída do `RAISE NOTICE` (quantos profissionais caíram em "Outros") e, se for um número alto, considerar revisar manualmente esses casos (talvez o texto livre tivesse profissões válidas que simplesmente não bateram com o `LIKE`).
 3. Testar de verdade: filtrar por uma especialidade no mapa e confirmar que profissionais antigos (cadastrados antes da migração 09) voltam a aparecer.
 4. Itens antigos ainda pendentes: migrações `07`-`09` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`).
+
+---
+
+## Sessão de 13/07/2026 (continuação — recorte de foto de perfil antes do upload)
+
+### Pedido
+Usuário pediu recurso de recorte de foto de perfil antes do upload final, especificando `cropper.js` (via CDN/npm), modal com `aspectRatio` 1:1, botão "Confirmar" com `getCroppedCanvas`, e integração no "componente de formulário de cadastro". A especificação usava termos de projeto web puro (input file, cropper.js, form submit) que não existem neste projeto — é Flutter/Dart, não HTML/JS.
+
+### Esclarecimento (via AskUserQuestion)
+Como `cropper.js` não roda em Flutter, e a tela de cadastro (`cadastro_screen.dart`) nem sequer tem campo de foto (confirmado via busca — a foto de perfil é escolhida só depois, nas telas de edição de perfil), perguntei ao usuário se queria o equivalente nativo Flutter. Escolheu: "Equivalente em Flutter (Recomendado)" — mesma UX (escolher foto → recortar 1:1 com zoom → confirmar → pronta pro upload), usando um pacote nativo de recorte, integrado nas telas de foto de perfil já existentes.
+
+### O que foi feito
+- **Novo widget compartilhado** `app/lib/widgets/selecao_foto_perfil.dart`:
+  - `escolherEEditarFotoDePerfil(context)`: função que unifica o fluxo completo — escolher origem (câmera/galeria) → `ImagePicker` → recortar em 1:1 via `ImageCropper` (pacote `image_cropper`) → devolve `XFile` + bytes já lidos, ou `null` se cancelado em qualquer etapa.
+  - `AvatarFotoPerfil`: widget visual (avatar redondo + selo de câmera + botão "Trocar foto de perfil"), também compartilhado.
+  - As duas telas que tratam foto de perfil (`editar_perfil_screen.dart`, do profissional, e `perfil_cliente_screen.dart`, do cliente) tinham exatamente a mesma lógica de escolha de foto duplicada — agora as duas usam este único widget, eliminando a duplicação e garantindo que nunca divirjam.
+- **`app/pubspec.yaml`**: adicionada dependência `image_cropper: ^8.1.0` — equivalente Flutter ao `cropper.js`: tela nativa de recorte com zoom/arraste no Android (UCrop) e iOS (TOCropViewController), implementação em JS por baixo no Flutter Web (mesmo princípio de canvas do cropper.js), tudo sob uma única API Dart.
+- **`app/ios/Runner/Info.plist`**: adicionadas `NSCameraUsageDescription` e `NSPhotoLibraryUsageDescription` — faltavam completamente no projeto (gap pré-existente, não causado por esta feature, mas que bloqueava qualquer acesso a câmera/galeria no iOS: sem essas chaves, o app crasha ao pedir a permissão, sem erro amigável).
+- `editar_perfil_screen.dart` e `perfil_cliente_screen.dart`: `_escolherFoto()` (lógica completa duplicada) virou `_trocarFoto()` (chama o widget compartilhado); o bloco de avatar inline em `build()` virou `AvatarFotoPerfil(...)`.
+
+### Verificação feita
+- Balanceamento de chaves/parênteses/colchetes (script Python) nos 3 arquivos Dart tocados/criados — OK.
+- Revisão manual linha a linha de cada `git diff` (sem SDK Flutter neste sandbox — não é possível rodar `flutter analyze`/`flutter pub get`/`flutter run` aqui).
+- **Corrupção de mount de novo** (mesmo bug de sempre): `pubspec.yaml`, `editar_perfil_screen.dart`, `perfil_cliente_screen.dart` e `Info.plist` vieram com bytes nulos sobrando depois das edições — todos reescritos por inteiro via heredoc a partir do conteúdo autoritativo (com `sed -i 's/$/\r/'` para restaurar CRLF em `pubspec.yaml`/`Info.plist`, que usam final de linha do Windows), reconferidos limpos antes de commitar. `selecao_foto_perfil.dart` (arquivo novo) sincronizou limpo de primeira.
+- Commit `55bd799` (5 arquivos, 200 inserções/120 remoções).
+
+### Pendências para a próxima sessão
+1. **Rodar `flutter pub get` numa máquina com Flutter/rede** (ex.: via Android Studio, como já foi feito com sucesso nesta sessão para outra tarefa) para confirmar que `image_cropper ^8.1.0` resolve e compila sem conflito com as outras dependências — não verificável neste sandbox.
+2. Testar o fluxo completo na prática: escolher foto → tela de recorte abre corretamente → confirmar → preview batendo com o que foi salvo, em ambas as telas (profissional e cliente), Android e (se possível) iOS.
+3. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`).
