@@ -138,6 +138,7 @@ export interface PerfilPublicoProfissional {
   contato: string;
   latitude: number | null;
   longitude: number | null;
+  endereco_atuacao: string | null;
 }
 
 /**
@@ -162,7 +163,8 @@ export async function buscarPerfilPublico(
        url_foto_perfil,
        contato,
        latitude,
-       longitude
+       longitude,
+       endereco_atuacao
      FROM profissionais
      WHERE profissional_id = $1`,
     [profissionalId],
@@ -174,6 +176,7 @@ export async function buscarPerfilPublico(
 export interface AtualizacaoPerfilProfissional {
   descricao?: string;
   urlFotoPerfil?: string;
+  enderecoAtuacao?: string;
 }
 
 /**
@@ -194,8 +197,9 @@ export async function atualizarPerfilProfissional(
 ): Promise<PerfilPublicoProfissional> {
   const { rows } = await pool.query<PerfilPublicoProfissional>(
     `UPDATE profissionais
-        SET descricao       = COALESCE($2, descricao),
-            url_foto_perfil = COALESCE($3, url_foto_perfil)
+        SET descricao        = COALESCE($2, descricao),
+            url_foto_perfil  = COALESCE($3, url_foto_perfil),
+            endereco_atuacao = COALESCE($4, endereco_atuacao)
       WHERE profissional_id = $1
       RETURNING
         profissional_id,
@@ -206,8 +210,9 @@ export async function atualizarPerfilProfissional(
         url_foto_perfil,
         contato,
         latitude,
-        longitude`,
-    [profissionalId, dados.descricao ?? null, dados.urlFotoPerfil ?? null],
+        longitude,
+        endereco_atuacao`,
+    [profissionalId, dados.descricao ?? null, dados.urlFotoPerfil ?? null, dados.enderecoAtuacao ?? null],
   );
   return rows[0];
 }

@@ -93,20 +93,22 @@ class ProfissionaisService {
   }
 
   /// PATCH /profissionais/me -- o PRÓPRIO profissional logado edita seu
-  /// perfil público (descrição e/ou foto). `descricao` e `foto` são os
-  /// dois opcionais -- mas ao menos um precisa vir, senão o backend recusa
+  /// perfil público (descrição, endereço de atuação e/ou foto). Todos
+  /// opcionais -- mas ao menos um precisa vir, senão o backend recusa
   /// com 400 (não faz sentido um PATCH que não muda nada).
   ///
   /// `foto` é `XFile?` (image_picker), igual ao padrão já usado em
   /// `AvaliacoesService.avaliarProfissional` -- funciona em mobile e web.
   Future<PerfilProfissional> atualizarMeuPerfil({
     String? descricao,
+    String? enderecoAtuacao,
     XFile? foto,
   }) async {
     final resposta = await _api.patchMultipart(
       '/profissionais/me',
       campos: {
         if (descricao != null) 'descricao': descricao,
+        if (enderecoAtuacao != null) 'endereco_atuacao': enderecoAtuacao,
       },
       bytesArquivo: foto != null ? await foto.readAsBytes() : null,
       nomeArquivo: foto?.name,

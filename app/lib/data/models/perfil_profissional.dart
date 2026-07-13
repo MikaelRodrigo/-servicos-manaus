@@ -15,6 +15,7 @@ class PerfilProfissional {
   final String contato;
   final double? latitude;
   final double? longitude;
+  final String? enderecoAtuacao;
 
   const PerfilProfissional({
     required this.id,
@@ -26,6 +27,7 @@ class PerfilProfissional {
     required this.contato,
     required this.latitude,
     required this.longitude,
+    required this.enderecoAtuacao,
   });
 
   factory PerfilProfissional.fromJson(Map<String, dynamic> json) {
@@ -39,6 +41,7 @@ class PerfilProfissional {
       contato: json['contato'] as String,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
+      enderecoAtuacao: json['endereco_atuacao'] as String?,
     );
   }
 }

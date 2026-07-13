@@ -248,6 +248,21 @@ class _ConteudoPerfil extends StatelessWidget {
             Text(perfil.contato),
           ],
         ),
+
+        // Endereço de atuação padrão -- só informativo (não afeta o cálculo
+        // de distância, que continua vindo de latitude/longitude), serve
+        // para o cliente ter uma noção de onde o profissional atua.
+        if (perfil.enderecoAtuacao != null && perfil.enderecoAtuacao!.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.location_on_outlined, size: 18, color: Colors.grey),
+              const SizedBox(width: 6),
+              Expanded(child: Text(perfil.enderecoAtuacao!)),
+            ],
+          ),
+        ],
         const SizedBox(height: 20),
 
         FilledButton.icon(

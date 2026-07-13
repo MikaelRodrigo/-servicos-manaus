@@ -123,9 +123,10 @@ profissionaisRouter.get(
    profissional editar o perfil de outro só trocando um ID no JSON.
 
    Content-Type: multipart/form-data
-   Campos (ambos opcionais, mas ao menos um precisa vir):
-     descricao   (texto, até 2000 caracteres)
-     foto_perfil (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
+   Campos (todos opcionais, mas ao menos um precisa vir):
+     descricao        (texto, até 2000 caracteres)
+     endereco_atuacao (texto, até 500 caracteres -- região/endereço padrão de atuação, só informativo)
+     foto_perfil      (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
 
    É rota PATCH, não POST: estamos atualizando um recurso que já existe (o
    cadastro do profissional), não criando um novo.
@@ -138,17 +139,19 @@ profissionaisRouter.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const descricao = textoOpcional(req.body.descricao, 'descricao', 2000);
+      const enderecoAtuacao = textoOpcional(req.body.endereco_atuacao, 'endereco_atuacao', 500);
       const urlFotoPerfil = req.file ? urlPublicaDoArquivoPerfil(req.file) : undefined;
 
-      if (descricao === undefined && urlFotoPerfil === undefined) {
+      if (descricao === undefined && enderecoAtuacao === undefined && urlFotoPerfil === undefined) {
         throw new ErroDeValidacao(
-          'Envie ao menos "descricao" ou uma foto ("foto_perfil") para atualizar.',
+          'Envie ao menos "descricao", "endereco_atuacao" ou uma foto ("foto_perfil") para atualizar.',
         );
       }
 
       const perfilAtualizado = await atualizarPerfilProfissional(req.usuario!.sub, {
         descricao,
         urlFotoPerfil,
+        enderecoAtuacao,
       });
 
       return res.json(perfilAtualizado);

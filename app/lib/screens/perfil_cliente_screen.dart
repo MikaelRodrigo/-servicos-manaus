@@ -1,53 +1,52 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
-import '../data/models/perfil_profissional.dart';
+import '../data/models/perfil_cliente.dart';
 import '../data/services/api_client.dart';
-import '../data/services/profissionais_service.dart';
-import '../providers/auth_provider.dart';
+import '../data/services/clientes_service.dart';
 
-/// Tela em que o PRÓPRIO profissional edita seu perfil público: foto e
-/// descrição ("sobre mim"). É o que alimenta os campos que antes ficavam
-/// sempre `null` -- sem esta tela, ninguém teria como preencher
-/// `descricao`/`url_foto_perfil` depois do cadastro.
-class EditarPerfilScreen extends StatefulWidget {
-  const EditarPerfilScreen({super.key});
+/// Tela de perfil do PRÓPRIO cliente: mostra foto, nome, e-mail (dados
+/// vindos do cadastro, não editáveis aqui) e permite editar contato,
+/// endereço fixo e foto de perfil -- visualização e edição na MESMA tela
+/// (diferente do profissional, que tem `perfil_profissional_screen.dart`
+/// para visualização pública + `editar_perfil_screen.dart` separada para
+/// edição; o cliente não tem perfil público, então uma tela só já basta).
+class PerfilClienteScreen extends StatefulWidget {
+  const PerfilClienteScreen({super.key});
 
   @override
-  State<EditarPerfilScreen> createState() => _EditarPerfilScreenState();
+  State<PerfilClienteScreen> createState() => _PerfilClienteScreenState();
 }
 
-class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
-  final _descricaoController = TextEditingController();
-  final _enderecoAtuacaoController = TextEditingController();
-  late Future<PerfilProfissional> _futuroPerfilAtual;
+class _PerfilClienteScreenState extends State<PerfilClienteScreen> {
+  final _contatoController = TextEditingController();
+  final _enderecoController = TextEditingController();
+  late Future<PerfilCliente> _futuroPerfilAtual;
 
+  PerfilCliente? _perfilCarregado;
   XFile? _fotoEscolhida;
   Uint8List? _bytesFotoEscolhida;
-  String? _urlFotoAtual;
   bool _salvando = false;
 
   @override
   void initState() {
     super.initState();
-    final meuId = context.read<AuthProvider>().usuario!.id;
-    _futuroPerfilAtual = ProfissionaisService.instancia.buscarPerfilPublico(meuId);
+    _futuroPerfilAtual = ClientesService.instancia.buscarMeuPerfil();
     _futuroPerfilAtual.then((perfil) {
       if (!mounted) return;
       setState(() {
-        _descricaoController.text = perfil.descricao ?? '';
-        _enderecoAtuacaoController.text = perfil.enderecoAtuacao ?? '';
-        _urlFotoAtual = perfil.urlFotoPerfil;
+        _perfilCarregado = perfil;
+        _contatoController.text = perfil.contato;
+        _enderecoController.text = perfil.endereco ?? '';
       });
     });
   }
 
   @override
   void dispose() {
-    _descricaoController.dispose();
-    _enderecoAtuacaoController.dispose();
+    _contatoController.dispose();
+    _enderecoController.dispose();
     super.dispose();
   }
 
@@ -87,30 +86,40 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   }
 
   Future<void> _salvar() async {
-    final descricao = _descricaoController.text.trim();
-    final enderecoAtuacao = _enderecoAtuacaoController.text.trim();
+    final perfilAtual = _perfilCarregado;
+    if (perfilAtual == null) return;
 
-    if (descricao.isEmpty && enderecoAtuacao.isEmpty && _fotoEscolhida == null) {
+    final contato = _contatoController.text.trim();
+    final endereco = _enderecoController.text.trim();
+
+    // Só manda o que de fato mudou -- evita um PATCH desnecessário quando
+    // a pessoa só abriu a tela e apertou "Salvar" sem alterar nada.
+    final contatoMudou = contato.isNotEmpty && contato != perfilAtual.contato;
+    final enderecoMudou = endereco != (perfilAtual.endereco ?? '');
+
+    if (!contatoMudou && !enderecoMudou && _fotoEscolhida == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Altere a descrição, o endereço de atuação ou escolha uma foto antes de salvar.'),
-        ),
+        const SnackBar(content: Text('Altere o contato, o endereço ou escolha uma foto antes de salvar.')),
       );
       return;
     }
 
     setState(() => _salvando = true);
     try {
-      final perfilAtualizado = await ProfissionaisService.instancia.atualizarMeuPerfil(
-        descricao: descricao.isNotEmpty ? descricao : null,
-        enderecoAtuacao: enderecoAtuacao.isNotEmpty ? enderecoAtuacao : null,
+      final perfilAtualizado = await ClientesService.instancia.atualizarMeuPerfil(
+        contato: contatoMudou ? contato : null,
+        endereco: enderecoMudou ? endereco : null,
         foto: _fotoEscolhida,
       );
       if (!mounted) return;
+      setState(() {
+        _perfilCarregado = perfilAtualizado;
+        _fotoEscolhida = null;
+        _bytesFotoEscolhida = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Perfil atualizado!')),
       );
-      Navigator.of(context).pop(perfilAtualizado);
     } on ApiException catch (erro) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));
@@ -123,15 +132,28 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Editar meu perfil')),
-      body: FutureBuilder<PerfilProfissional>(
+      appBar: AppBar(title: const Text('Meu perfil')),
+      body: FutureBuilder<PerfilCliente>(
         future: _futuroPerfilAtual,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final urlFotoAtual = ApiConfig.urlAbsoluta(_urlFotoAtual);
+          if (snapshot.hasError) {
+            final mensagem = snapshot.error is ApiException
+                ? (snapshot.error as ApiException).mensagem
+                : 'Não foi possível carregar seu perfil.';
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(mensagem, textAlign: TextAlign.center),
+              ),
+            );
+          }
+
+          final perfil = _perfilCarregado ?? snapshot.data!;
+          final urlFotoAtual = ApiConfig.urlAbsoluta(perfil.urlFotoPerfil);
 
           return ListView(
             padding: const EdgeInsets.all(20),
@@ -170,26 +192,40 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
               ),
               const SizedBox(height: 20),
 
+              Center(
+                child: Text(
+                  perfil.nomeExibicao,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Center(
+                child: Text(
+                  perfil.email,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade700),
+                ),
+              ),
+              const SizedBox(height: 24),
+
               TextField(
-                controller: _descricaoController,
-                maxLines: 5,
-                maxLength: 2000,
+                controller: _contatoController,
+                keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(
-                  labelText: 'Sobre mim',
-                  hintText: 'Conte um pouco sobre sua experiência e seus serviços...',
+                  labelText: 'Contato (telefone/WhatsApp)',
+                  hintText: '92988887777',
                   border: OutlineInputBorder(),
-                  alignLabelWithHint: true,
                 ),
               ),
               const SizedBox(height: 16),
 
               TextField(
-                controller: _enderecoAtuacaoController,
-                maxLines: 2,
+                controller: _enderecoController,
+                maxLines: 3,
                 maxLength: 500,
                 decoration: const InputDecoration(
-                  labelText: 'Endereço de atuação padrão',
-                  hintText: 'Ex.: Atende na zona Centro-Sul, próximo ao Shopping X...',
+                  labelText: 'Endereço fixo',
+                  hintText: 'Rua, número, bairro...',
                   border: OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),

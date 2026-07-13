@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { env } from './env';
 import { profissionaisRouter } from './routes/profissionais.routes';
+import { clientesRouter } from './routes/clientes.routes';
 import { authRouter } from './routes/auth.routes';
 import { servicosRouter } from './routes/servicos.routes';
 import { curtidasRouter } from './routes/curtidas.routes';
@@ -49,6 +50,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 app.use('/profissionais', profissionaisRouter);
+app.use('/clientes', clientesRouter);
 app.use('/auth', authRouter);
 app.use('/servicos', servicosRouter);
 app.use('/avaliacoes', curtidasRouter);
