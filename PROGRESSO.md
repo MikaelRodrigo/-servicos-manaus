@@ -549,3 +549,43 @@ Simplificar a barra de filtros do mapa: a linha fixa de raio (1-5km) sai da barr
 ### Pendências para a próxima sessão
 1. Testar de verdade no Flutter: clicar em "Mais próximos" e ver a linha de raio aparecer com a transição suave; clicar em "Melhor custo-benefício"/"Melhores avaliados" e ver a linha sumir; voltar para "Mais próximos" e confirmar que o raio escolhido antes continua selecionado.
 2. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações, se o usuário quiser isso de verdade (não só um rótulo).
+
+---
+
+## Sessão de 13/07/2026 (continuação — bug reportado: profissional "some" ao aumentar o raio)
+
+### Pedido
+Usuário relatou que aumentar o raio (ex.: 2km → 5km) parecia SUBSTITUIR a lista de profissionais em vez de somar quem passou a entrar na área — citando um exemplo concreto: "Diego" (visível em 2km) deveria continuar aparecendo em 5km, junto com "Patrícia", e não sumir. Pediu explicitamente: (1) lógica de raio cumulativa, (2) filtro atuando como "cerca" (`distance <= raio`), (3) lista não sendo limpa incorretamente ao trocar o raio, (4) revisão da função de distância para confirmar que o `<=` está sendo respeitado.
+
+### Diagnóstico
+Analisei a query em `profissionais.repository.ts` e o predicado `ST_DWithin(geography, geography, metros)` do PostGIS. Duas propriedades confirmadas contra a documentação oficial do PostGIS:
+- `ST_DWithin` é `distância <= raio` — já inclusivo na borda, não `< raio`.
+- Cada chamada roda de novo contra a tabela INTEIRA de `profissionais` — não existe estado entre uma busca e outra, não há "memória" de quem apareceu antes.
+
+Consequência matemática: todo profissional que satisfaz `distância <= 2000` também satisfaz `distância <= 5000`. Não existe caminho no SQL para alguém "sumir" ao crescer o raio — a busca já é cumulativa por construção. Não encontrei bug real na lógica de distância em si.
+
+Causa mais provável do sintoma relatado: o mapa (`mapa_screen.dart`) mantinha o mesmo zoom fixo (14) em toda busca (`_mapController.move(..., 14)`), sem nunca reenquadrar a câmera pelos resultados. Um profissional que só passa a entrar no resultado com um raio maior pode estar fora da área atualmente visível na tela — parece ter sumido, mas nunca chegou a estar visível.
+
+Achado secundário (estrutural, não a causa do bug relatado, mas risco real à medida que a base cresce): o teto de resultados por busca era 20 (padrão) / 100 (máximo) — baixo demais para o mapa, que quer mostrar TODO MUNDO dentro do raio escolhido, não uma lista paginada.
+
+### O que foi feito
+- `backend/src/repositories/profissionais.repository.ts` — comentário extenso deixado diretamente acima do `ST_DWithin(...)` no WHERE, documentando a inclusividade/cumulatividade confirmada (nenhuma mudança de lógica — a query já estava correta).
+- `backend/src/routes/profissionais.routes.ts` — teto de `limite` na rota `/proximos` elevado de 100 para 500 (outras rotas paginadas continuam em 100; só esta, que representa um "cerco" geográfico e não uma lista navegável, precisa do teto maior).
+- `app/lib/data/services/profissionais_service.dart` / `app/lib/providers/profissionais_provider.dart` — `buscarProximos` ganhou parâmetro opcional `limite`, propagado até a chamada HTTP.
+- `app/lib/screens/mapa_screen.dart`:
+  - Nova constante `_limiteDeProfissionaisNoMapa = 200`, passada em toda busca.
+  - Nova função `_ajustarCameraParaResultados()`, chamada ao final de `_buscar()`: monta a lista de pontos (usuário + cada profissional retornado) e usa `MapController.fitCamera(CameraFit.bounds(bounds: LatLngBounds.fromPoints(pontos), padding: EdgeInsets.all(48)))` para reenquadrar o mapa e caber todo o resultado. Quando não há nenhum profissional no raio (só o ponto do usuário), usa `MapController.move(centro, 14)` em vez de `fitCamera` — bounds de um ponto só têm área zero e o cálculo de zoom do `fitCamera` pode virar `Infinity`/`NaN` nesse caso.
+  - API do `flutter_map ^8.3.1` (`LatLngBounds`, `fitCamera`, `CameraFit.bounds`) verificada via pesquisa dedicada contra pub.dev/GitHub antes de escrever o código, incluindo o caso de borda de bounds com um ponto só.
+
+### Verificação feita
+- **Corrupção de mount de novo** (mesmo bug recorrente desta sessão inteira): `npx tsc --noEmit` acusou erros de sintaxe nos dois arquivos backend tocados — reescritos por inteiro via heredoc a partir do conteúdo autoritativo.
+- **Bug real encontrado durante a reescrita** (não era só corrupção de mount): o comentário novo em `profissionais.repository.ts` usava crases (`` ` ``) no estilo "código inline" (ex.: `` `_ajustarCameraParaResultados` ``) dentro do comentário SQL — mas esse comentário vive DENTRO do template literal (também delimitado por crases) que monta a query. As crases internas fechavam a string JavaScript mais cedo, quebrando a sintaxe de verdade. Corrigido trocando as crases por aspas duplas dentro do comentário. `npx tsc --noEmit` limpo depois da correção.
+- Os três arquivos Flutter tocados também estavam com mount desatualizado (linhas a menos que o conteúdo revisado) — reescritos via heredoc a partir do conteúdo já revisado, reconferidos por `wc -l`/`file`.
+- Balanceamento de chaves/parênteses/colchetes (script Python, com tratamento de comentários `//`/`/* */` e strings) rodado nos três arquivos Dart tocados — OK nos três.
+- `git diff --stat` conferido antes do commit — só os 5 arquivos pretendidos (93 inserções, 8 remoções).
+- Commit `ee0db8b`.
+- **Não foi possível reproduzir o bug relatado neste sandbox** — sem acesso à base Neon real (nenhuma query rodou contra dados de verdade) e sem SDK Flutter (não dá para rodar o app e ver o mapa/zoom na prática). A análise da lógica de distância é matemática/por leitura de código; a correção do zoom é a explicação mais plausível encontrada, mas recomendo fortemente testar no dispositivo/ambiente real: aumentar o raio de 2km para 5km e confirmar que "Diego" continua na lista/mapa junto com "Patrícia".
+
+### Pendências para a próxima sessão
+1. **Testar de verdade** o cenário relatado pelo usuário (raio 2km → 5km, profissionais "Diego" e "Patrícia") num dispositivo/ambiente com Flutter real e a base Neon populada — este sandbox não permite validar nem a query contra dados reais nem o comportamento do mapa.
+2. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações, se o usuário quiser isso de verdade (não só um rótulo).
