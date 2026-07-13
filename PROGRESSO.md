@@ -207,3 +207,38 @@ No primeiro commit desta etapa, `git add -A` reportou `error: bad signature 0x00
 1. **Rodar as migrações `07` e `08` no Neon** (e confirmar `04`–`06` já aplicadas) — segue pendente de sessões anteriores.
 2. Testar de verdade o fluxo de CEP (agora ViaCEP + Nominatim) a partir do backend rodando fora deste sandbox, com CEPs reais de Manaus — inclusive o `69043000` que falhou antes.
 3. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
+---
+
+## Sessão de 13/07/2026 — Seleção de categoria em cascata (chip input)
+
+### Pedido
+Substituir os campos de texto livre "profissão" (PF) e "categoria de atuação" (PJ) por um único campo de busca que funciona como seletor em cascata: o profissional escolhe primeiro uma CATEGORIA (ex.: "Beleza e Bem-Estar"), depois uma SUBCATEGORIA filtrada por ela (ex.: "Barbeiro"), cada escolha "congelada" dentro do campo como um Chip removível. Sem texto livre — só seleção de uma lista fechada, para garantir integridade no banco. Lista de 7 categorias e ~60 subcategorias fornecida pelo usuário.
+
+### O que foi feito
+
+**Banco de dados**
+- `database/09_categorias_subcategorias.sql` — novas tabelas `categorias` (pai) e `subcategorias` (filho, com FK para a categoria). Seed com as 7 categorias e todas as subcategorias fornecidas. `profissionais` ganha `categoria_id`/`subcategoria_id`, com uma **FK composta** `(subcategoria_id, categoria_id) REFERENCES subcategorias (subcategoria_id, categoria_id)` — o truque que faz o Postgres recusar automaticamente um par incoerente (ex.: categoria "Beleza" com subcategoria "Pedreiro"), sem precisar de trigger nem validação duplicada no backend. `profissao`/`categoria_atuacao` (texto livre antigo) ficam **deprecadas** (comentário no banco), mantidas só por causa de cadastros antigos.
+
+**Backend**
+- Novo `backend/src/repositories/categorias.repository.ts` + `backend/src/routes/categorias.routes.ts` — `GET /categorias` (pública), devolve a árvore categoria → subcategorias de uma vez (registrado em `app.ts`).
+- `auth.repository.ts`/`auth.routes.ts` — cadastro de profissional (PF e PJ) agora EXIGE `categoria_id`/`subcategoria_id` (antes eram `profissao`/`categoria_atuacao`, opcionais e livres). Novo validador `inteiroPositivoObrigatorio` em `validacao.ts`. FK inválida (par categoria/subcategoria incoerente) vira erro 400 amigável, não erro cru do Postgres.
+- `profissionais.repository.ts` — `buscarProximos`, `buscarPerfilPublico` e `atualizarPerfilProfissional` trocam `COALESCE(profissao, categoria_atuacao)` por `LEFT JOIN` em `subcategorias`/`categorias`. O campo `atuacao` no JSON continua com o MESMO nome de antes (agora vindo da subcategoria) — o Flutter existente (mapa, perfil público) não precisou de nenhuma mudança para continuar funcionando.
+
+**Flutter**
+- Novo model `app/lib/data/models/categoria.dart` (`Categoria` com lista de `Subcategoria` aninhada) e `app/lib/data/services/categorias_service.dart` (`GET /categorias`).
+- Novo widget `app/lib/widgets/seletor_categoria_cascata.dart` (`SeletorCategoriaCascata`): campo único estilo `InputDecorator` que abre uma folha de baixo (`showModalBottomSheet` + `DraggableScrollableSheet`) com busca — a busca só FILTRA a lista já carregada, nunca vira texto livre. Categoria escolhida vira `InputChip` (toque no corpo reabre a escolha, toque no "x" remove); depois aparece um `ActionChip` "Escolher especialidade" que abre a mesma folha filtrada pela categoria; ao escolher, vira um segundo `InputChip` ao lado do primeiro. Remover a categoria remove a subcategoria junto.
+- `cadastro_screen.dart` — os dois `TextFormField` antigos (`_profissao` do PF, `_categoriaAtuacao` do PJ) foram removidos; um único `SeletorCategoriaCascata` (compartilhado entre PF e PJ) aparece sempre que o papel é "profissional". Lista de categorias é buscada uma vez no `initState`. Validação bloqueia o envio se a categoria+subcategoria não estiverem completas, e `categoria_id`/`subcategoria_id` (inteiros) vão no corpo do cadastro.
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros.
+- Balanceamento de chaves/parênteses/colchetes (script Python, ignorando strings/comentários) em todos os arquivos Dart novos/alterados — OK.
+- `git status`/`git ls-tree` confirmando que só os 12 arquivos esperados entraram no commit (6 novos + 6 alterados), árvore do commit com 203 arquivos (197 anteriores + 6 novos).
+- Não foi possível rodar `flutter analyze`/`flutter run` neste ambiente (sem SDK Flutter) nem testar `GET /categorias` contra um Postgres de verdade (sandbox sem acesso de rede) — checagem só estática + revisão de tipos.
+
+### Pendências para a próxima sessão
+1. **Rodar a migração `09_categorias_subcategorias.sql` no Neon** (junto com `07`/`08` ainda pendentes) — sem isso, cadastro de profissional quebra (`categoria_id`/`subcategoria_id` não existem no banco).
+2. Testar ponta a ponta de verdade: abrir cadastro como profissional (PF e PJ) → tocar no seletor → escolher categoria → escolher subcategoria → ver os dois chips → tentar remover um chip → cadastrar e conferir que o perfil público mostra a subcategoria escolhida em `atuacao`.
+3. Considerar expor `categoria` (não só `atuacao`/subcategoria) na tela de perfil público, já que o backend agora devolve os dois — hoje só `atuacao` é exibida.
+4. Avaliar se vale permitir EDITAR a categoria depois do cadastro (hoje, igual a antes, só é definida na hora de criar a conta — não existe campo no `PATCH /profissionais/me`).
+5. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
