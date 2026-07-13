@@ -523,3 +523,29 @@ Sistema avançado de filtros na busca do cliente: (1) filtro de raio de proximid
 1. Testar de verdade no Flutter: trocar o raio e a ordenação no mapa, conferir que a lista de pinos muda na hora e que "Melhor custo-benefício"/"Melhores avaliados" ordenam como esperado (e que profissionais sem avaliação nenhuma aparecem por último, não em primeiro por causa de `NULL`).
 2. Se "Pontualidade" for de fato um critério que o usuário quer ver refletido nas avaliações (não só um rótulo alternativo para "comportamental"), é uma migração nova: nova coluna `estrelas_pontualidade` em `avaliacoes_profissional`, mais os ajustes correspondentes na tela de avaliação e nos resumos exibidos no perfil.
 3. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); confirmar fix do cropper.js no Web.
+
+---
+
+## Sessão de 13/07/2026 (continuação — refatorar barra de filtros: raio vira sub-filtro condicional)
+
+### Pedido
+Simplificar a barra de filtros do mapa: a linha fixa de raio (1-5km) sai da barra principal, que passa a ter só os 3 botões de ordenação ("Mais próximos", "Melhor custo-benefício", "Melhores avaliados"). Uma linha de raio secundária deve aparecer só quando "Mais próximos" está selecionado, com faixas novas ("Até 2km", "Até 5km", "Até 8km", "Até 15km", "Mais que 15km"), escondendo-se automaticamente nos outros dois filtros, com transição animada (fade/slide) e estado mantido de forma intuitiva ao trocar entre eles.
+
+### O que foi feito
+`app/lib/screens/mapa_screen.dart`:
+- Removida a lista fixa `_raiosDisponiveisKm` (1/2/3/4/5) e a linha de chips que sempre ficava visível.
+- Barra principal agora só tem os 3 `ChoiceChip` de `_OrdenacaoBusca` (já existia da sessão anterior).
+- Novo enum `_OpcaoRaio`: 5 faixas com rótulo + valor km real mandado pro backend (`ate2km`=2, `ate5km`=5, `ate8km`=8, `ate15km`=15, `maisDe15km`=50 -- essa última usa o teto que o backend já aceita hoje, `RAIO_MAXIMO_KM`, padrão 50 em `env.ts`; não existe "sem limite" de verdade no backend, então "Mais que 15km" na prática é "até o máximo que o servidor permite").
+- Linha de raio envolvida num `AnimatedCrossFade` (220ms, `Curves.easeInOut`): `firstChild` é a linha de chips, `secondChild` é um `SizedBox` de altura zero. Alterna via `crossFadeState` conforme a ordenação selecionada é ou não `distancia` -- anima altura E opacidade nativamente, sem precisar de `AnimatedSize`/`AnimatedContainer` manual.
+- `_raioSelecionado` (estado) nunca é resetado ao trocar de ordenação -- só a LINHA de chips fica visível/invisível. O raio escolhido continua sendo usado na busca mesmo com os outros dois filtros ativos (só o controle visual some, o filtro em si não); voltar para "Mais próximos" depois mostra o mesmo raio que estava selecionado antes.
+
+### Verificação feita
+- Balanceamento de chaves/parênteses/colchetes (script Python) -- OK.
+- **Corrupção de mount de novo** (mesmo bug recorrente): arquivo veio truncado depois da edição -- reescrito por inteiro via heredoc a partir do conteúdo autoritativo, reconferido (`wc -l`/`file` batendo com o esperado) antes de commitar.
+- `git diff --stat` conferido -- só `mapa_screen.dart`, 77 inserções/38 remoções, tamanho batendo com a refatoração pretendida.
+- Commit `9e66dba`.
+- Não foi possível rodar `flutter run` neste sandbox (sem SDK Flutter) -- a animação (`AnimatedCrossFade`) e o comportamento reativo (mostrar/esconder linha de raio, manter estado) foram revisados apenas por leitura de código, não executados.
+
+### Pendências para a próxima sessão
+1. Testar de verdade no Flutter: clicar em "Mais próximos" e ver a linha de raio aparecer com a transição suave; clicar em "Melhor custo-benefício"/"Melhores avaliados" e ver a linha sumir; voltar para "Mais próximos" e confirmar que o raio escolhido antes continua selecionado.
+2. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações, se o usuário quiser isso de verdade (não só um rótulo).
