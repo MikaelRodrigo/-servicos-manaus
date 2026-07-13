@@ -26,6 +26,15 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Exigidas pelo iOS para o `image_picker` (tirar foto / escolher da
+	     galeria) e pela tela de recorte do `image_cropper` (que reabre a
+	     foto para editar). Sem essas duas chaves, o app CRASHA assim que
+	     tenta pedir a permissão -- o iOS não mostra um erro amigável, só
+	     derruba o processo. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Precisamos da câmera para você tirar uma foto de perfil.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Precisamos acessar suas fotos para você escolher uma imagem de perfil.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -44,6 +44,10 @@ dependencies:
   geolocator: ^14.0.3
   flutter_secure_storage: ^10.3.1
   image_picker: ^1.2.3
+  # Recorte de foto de perfil (aspectRatio fixo em 1:1) antes do upload --
+  # equivalente Flutter ao cropper.js: tela nativa com zoom/arraste no
+  # Android e iOS, implementação em JS (mesmo princípio de canvas) no Web.
+  image_cropper: ^8.1.0
 
 dev_dependencies:
   flutter_test:

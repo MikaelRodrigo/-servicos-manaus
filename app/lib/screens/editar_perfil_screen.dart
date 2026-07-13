@@ -10,6 +10,7 @@ import '../data/services/api_client.dart';
 import '../data/services/categorias_service.dart';
 import '../data/services/profissionais_service.dart';
 import '../providers/auth_provider.dart';
+import '../widgets/selecao_foto_perfil.dart';
 import '../widgets/seletor_categoria_cascata.dart';
 
 /// Tela em que o PRÓPRIO profissional edita seu perfil público: foto,
@@ -95,38 +96,16 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
     super.dispose();
   }
 
-  Future<void> _escolherFoto() async {
-    final origem = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (contextoFolha) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Tirar foto'),
-              onTap: () => Navigator.of(contextoFolha).pop(ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Escolher da galeria'),
-              onTap: () => Navigator.of(contextoFolha).pop(ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (origem == null) return;
-
-    final arquivo = await ImagePicker().pickImage(source: origem, imageQuality: 85);
-    if (arquivo == null) return;
-
-    final bytes = await arquivo.readAsBytes();
-    if (!mounted) return;
+  // Escolher origem + selecionar + RECORTAR (1:1) moram todos em
+  // `escolherEEditarFotoDePerfil` (widgets/selecao_foto_perfil.dart) --
+  // compartilhado com `perfil_cliente_screen.dart`, para as duas telas
+  // nunca divergirem no fluxo de troca de foto.
+  Future<void> _trocarFoto() async {
+    final resultado = await escolherEEditarFotoDePerfil(context);
+    if (resultado == null || !mounted) return;
     setState(() {
-      _fotoEscolhida = arquivo;
-      _bytesFotoEscolhida = bytes;
+      _fotoEscolhida = resultado.arquivo;
+      _bytesFotoEscolhida = resultado.bytes;
     });
   }
 
@@ -225,35 +204,10 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
             padding: const EdgeInsets.all(20),
             children: [
               Center(
-                child: GestureDetector(
-                  onTap: _escolherFoto,
-                  child: Stack(
-                    alignment: Alignment.bottomRight,
-                    children: [
-                      CircleAvatar(
-                        radius: 56,
-                        backgroundColor: Colors.grey.shade300,
-                        backgroundImage: _bytesFotoEscolhida != null
-                            ? MemoryImage(_bytesFotoEscolhida!)
-                            : (urlFotoAtual != null ? NetworkImage(urlFotoAtual) : null)
-                                as ImageProvider?,
-                        child: _bytesFotoEscolhida == null && urlFotoAtual == null
-                            ? const Icon(Icons.person, size: 56, color: Colors.white)
-                            : null,
-                      ),
-                      const CircleAvatar(
-                        radius: 18,
-                        child: Icon(Icons.camera_alt, size: 18),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Center(
-                child: TextButton(
-                  onPressed: _escolherFoto,
-                  child: const Text('Trocar foto de perfil'),
+                child: AvatarFotoPerfil(
+                  bytesFotoEscolhida: _bytesFotoEscolhida,
+                  urlFotoAtual: urlFotoAtual,
+                  onTocar: _trocarFoto,
                 ),
               ),
               const SizedBox(height: 20),
