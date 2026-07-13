@@ -31,6 +31,19 @@
 
   <title>servicos_manaus_app</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    Cropper.js -- exigido pelo pacote `image_cropper` (recorte de foto de
+    perfil) quando roda no Flutter Web. O modal "Crop Image" (título, imagem,
+    slider de zoom, botões girar/Cancel/Crop) é desenhado pelo próprio
+    plugin em Dart e aparece de qualquer jeito, MESMO sem esses dois tags --
+    mas arrastar pra reposicionar e o slider de zoom só funcionam de verdade
+    através desta biblioteca JS, que o plugin carrega por baixo dos panos.
+    Sem ela, os controles ficam visíveis só que "mortos" (exatamente o
+    sintoma relatado: aparece tudo, mas nada responde ao toque/arraste).
+  -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 </head>
 <body>
   <!--
