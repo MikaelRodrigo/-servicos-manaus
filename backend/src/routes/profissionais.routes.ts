@@ -145,7 +145,9 @@ profissionaisRouter.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const descricao = textoOpcional(req.body.descricao, 'descricao', 2000);
-      const urlFotoPerfil = req.file ? urlPublicaDoArquivoPerfil(req.file) : undefined;
+      const urlFotoPerfil = req.file
+        ? urlPublicaDoArquivoPerfil(req.file as Express.MulterS3.File)
+        : undefined;
 
       // CEP é opcional (o campo pode não vir no request), mas QUANDO vem,
       // precisa ter exatamente 8 dígitos -- mesma convenção de `contato`

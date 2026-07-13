@@ -28,6 +28,8 @@ Copie o `.env.example` para `.env` e preencha com os dados do banco Neon (peça 
 copy .env.example .env
 ```
 
+> **Etapa 9 (Deploy):** o backend também exige credenciais `S3_*` (storage S3-compatible para fotos), **inclusive para rodar em desenvolvimento** — a API é stateless de propósito, não escreve mais nada no disco local. Crie um bucket gratuito (ex.: Cloudflare R2, tier free) e preencha `S3_ENDPOINT`/`S3_BUCKET_NAME`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` no `.env` — sem isso o `npm run dev` recusa subir. Detalhes de cada variável estão comentados no `.env.example`.
+
 ### Rodando as migrações do banco
 
 O banco já existe no Neon (não é do zero). As migrações em `database/` precisam ser aplicadas **na ordem**, uma vez cada, direto no SQL Editor do Neon (ou via `psql`):

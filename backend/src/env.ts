@@ -44,4 +44,25 @@ export const env = {
   },
 
   bcryptSaltRounds: numero('BCRYPT_SALT_ROUNDS', 10),
+
+  // Storage S3-compatible (Cloudflare R2, AWS S3, MinIO...) para as fotos de
+  // avaliação e de perfil. Obrigatório sempre (dev incluso) -- Etapa 9 tornou
+  // a API stateless de propósito: nenhum arquivo de usuário pode depender do
+  // disco local do servidor, nem em desenvolvimento, para que o comportamento
+  // seja o mesmo em qualquer ambiente. Use um bucket gratuito (ex.: Cloudflare
+  // R2, tier free) também para rodar localmente.
+  s3: {
+    endpoint: obrigatoria('S3_ENDPOINT'),
+    region: process.env.S3_REGION ?? 'auto',
+    bucketName: obrigatoria('S3_BUCKET_NAME'),
+    accessKeyId: obrigatoria('S3_ACCESS_KEY_ID'),
+    secretAccessKey: obrigatoria('S3_SECRET_ACCESS_KEY'),
+    // URL PÚBLICA do bucket (R2.dev subdomain ou domínio customizado) --
+    // DIFERENTE do `endpoint` acima. O `endpoint` é a API S3 (exige
+    // assinatura AWS SigV4 até para GET, o app não consegue simplesmente
+    // carregar uma imagem dali). Sem essa variável, a URL salva no banco
+    // aponta para um recurso que `Image.network` no Flutter não consegue
+    // abrir -- ver `middlewares/upload.ts`, que monta a URL final com isto.
+    publicUrlBase: obrigatoria('S3_PUBLIC_URL_BASE'),
+  },
 } as const;
