@@ -165,7 +165,29 @@ class _BuscaSubcategoriaAutocompleteState extends State<BuscaSubcategoriaAutocom
                         final resultado = opcoes[indice];
                         return ListTile(
                           dense: true,
-                          title: Text(resultado.subcategoria.nome),
+                          // Nome + contagem de profissionais ativos nessa
+                          // subcategoria (ex.: "Encanador (9)") -- a contagem
+                          // já vem pronta desde `GET /categorias` (calculada
+                          // no banco com `COUNT`+`GROUP BY`, uma vez por
+                          // tela, nunca por tecla digitada aqui), então só
+                          // resta exibi-la com um peso visual mais leve que
+                          // o nome, pra manter a hierarquia: nome em destaque,
+                          // número como detalhe secundário.
+                          title: Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(resultado.subcategoria.nome),
+                              const SizedBox(width: 6),
+                              Text(
+                                '(${resultado.subcategoria.totalProfissionais})',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                              ),
+                            ],
+                          ),
                           // Requisito 3: hierarquia contextual -- mostra a
                           // categoria pai junto do resultado.
                           subtitle: Text('em: ${resultado.categoria.nome}'),

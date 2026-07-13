@@ -4,12 +4,19 @@ class Subcategoria {
   final int id;
   final String nome;
 
-  const Subcategoria({required this.id, required this.nome});
+  /// Quantos profissionais têm essa subcategoria agora -- já vem pronto do
+  /// backend (`categorias.repository.ts`, um `COUNT` agregado numa query só)
+  /// junto com o resto da árvore de categorias, buscada UMA vez por tela.
+  /// Usado no autocomplete de busca do mapa para mostrar "Encanador (9)".
+  final int totalProfissionais;
+
+  const Subcategoria({required this.id, required this.nome, this.totalProfissionais = 0});
 
   factory Subcategoria.fromJson(Map<String, dynamic> json) {
     return Subcategoria(
       id: json['id'] as int,
       nome: json['nome'] as String,
+      totalProfissionais: json['totalProfissionais'] as int? ?? 0,
     );
   }
 }
