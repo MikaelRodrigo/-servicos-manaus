@@ -242,3 +242,37 @@ Substituir os campos de texto livre "profissão" (PF) e "categoria de atuação"
 3. Considerar expor `categoria` (não só `atuacao`/subcategoria) na tela de perfil público, já que o backend agora devolve os dois — hoje só `atuacao` é exibida.
 4. Avaliar se vale permitir EDITAR a categoria depois do cadastro (hoje, igual a antes, só é definida na hora de criar a conta — não existe campo no `PATCH /profissionais/me`).
 5. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
+---
+
+## Sessão de 13/07/2026 (continuação — busca global de subcategoria no mapa do cliente)
+
+### Pedido
+Componente de busca na tela do CLIENTE (mapa): uma única barra que filtra em tempo real TODAS as subcategorias de TODAS as categorias (sem exigir escolher a categoria pai antes), com autocomplete mostrando a categoria pai como contexto ("Eletricista (em: Manutenção e Reforma)"). Ao selecionar, vira Chip e a busca no mapa passa a filtrar exatamente por aquela subcategoria. Sem texto livre -- só itens da árvore já cadastrada.
+
+### Achado inesperado: commit concorrente de outro colaborador
+No meio desta etapa, um `git log` revelou um commit novo (`54f1c0c`, autor "Alexandre Martins", diferente do "Mikael Rodrigo" de todos os commits anteriores) que já tocava os mesmos três arquivos de backend que eu estava editando (`validacao.ts`, `profissionais.routes.ts`, `profissionais.repository.ts`) -- aparentemente uma versão paralela/anterior do mesmo trabalho. Esse commit carregava um bug: um comentário SQL com crase (`` `subcategoria_id` ``) dentro de um template literal JS também delimitado por crase, o que fecha a string prematuramente e quebra a compilação (`tsc` acusava `Unterminated template literal`). Corrigido removendo as crases do comentário; o restante do commit (função `inteiroPositivoOpcional`, parâmetro `subcategoria_id` na rota) já batia com o que eu ia implementar, então não precisou reverter nada, só consertar o bug e seguir.
+
+**Lição:** como o repositório local É a mesma pasta que outras pessoas/ferramentas podem tocar, vale sempre rodar `git log --oneline -5` antes de commitar algo que mexe em arquivo compartilhado, para não sobrescrever trabalho concorrente sem perceber.
+
+### O que foi feito
+
+**Backend**
+- `profissionais.repository.ts` -- corrigido o bug de crase citado acima (SQL do `buscarProximos` volta a compilar).
+
+**Flutter**
+- Novo widget `app/lib/widgets/busca_subcategoria_autocomplete.dart` (`BuscaSubcategoriaAutocomplete`): usa o `Autocomplete<T>` nativo do Flutter. A lista de subcategorias é "achatada" (cada subcategoria pareada com sua categoria-pai) UMA VEZ em `initState`/`didUpdateWidget`, não a cada tecla -- digitar só filtra esse array pequeno em memória, sem chamada de rede. Busca por "começa com" (prioridade) e "contém", normalizando acento/maiúscula. Resultado escolhido vira `InputChip` removível (campo de busca some enquanto o chip existir); dropdown redimensiona com `LayoutBuilder` para acompanhar a largura do campo (responsivo).
+- `profissionais_service.dart`/`profissionais_provider.dart` -- `buscarProximos` ganha `subcategoriaId` (filtro exato), complementar ao `profissao` textual legado que já existia.
+- `mapa_screen.dart` -- troca o `TextField` de busca livre por profissão pelo novo `BuscaSubcategoriaAutocomplete`. Categorias carregadas uma vez no `initState` (falha silenciosa se a rede falhar -- o mapa em si continua funcionando). Selecionar/remover uma especialidade rebusca automaticamente no mapa, sem botão "aplicar" separado.
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` -- sem erros (depois de corrigir o bug de crase).
+- Balanceamento de chaves/parênteses/colchetes verificado de duas formas: script Python com remoção de strings/comentários (deu falso positivo em `mapa_screen.dart` por causa de `'Olá, ${usuario?.nome ?? ''}'` -- aspas simples aninhadas dentro de uma interpolação confundem uma regex simples) E contagem bruta sem nenhuma remoção (que teoricamente pode ter o problema oposto, mas bateu limpo em todos os arquivos: chaves/parênteses/colchetes exatamente iguais). Tratado como confiável dado que os dois métodos, juntos, cobrem os casos problemáticos.
+- **Armadilha de sincronização confirmada de novo:** em pelo menos 4 arquivos nesta etapa (`validacao.ts`, `profissionais.repository.ts`, `profissionais.routes.ts`, `profissionais_provider.dart`), o conteúdo visto pela ferramenta de edição (lado "Windows") não bateu com o que o `bash`/mount enxergava logo em seguida -- em alguns casos por truncamento (arquivo cortado no meio), em outros por bytes nulos sobrando no fim do arquivo. Sempre que isso aconteceu, a causa raiz só foi confirmada comparando `wc -l`/conteúdo bruto dos dois lados e reescrevendo o arquivo inteiro via heredoc no mount. **Conclusão prática: não dá mais para presumir sincronização "ao vivo" entre os dois lados -- todo arquivo tocado precisa ser conferido (grep/wc -l/`file`) no mount antes de rodar `tsc`/commitar.**
+- `git status`/`git ls-tree` confirmando árvore com 204 arquivos (203 anteriores + 1 novo) e commit `e4a357c` só com os 5 arquivos esperados.
+
+### Pendências para a próxima sessão
+1. Testar de verdade no Flutter (`flutter run`): digitar no campo de busca do mapa, conferir que o dropdown aparece com "em: Categoria", selecionar um resultado, ver o Chip aparecer, conferir que o mapa refiltra pelos profissionais daquela subcategoria exata, remover o Chip e ver a busca voltar ao normal.
+2. Migrações `07` a `09` seguem pendentes de rodar no Neon (ver seções anteriores).
+3. Confirmar com o time/colaborador (autor do commit `54f1c0c`) se há mais trabalho em andamento nos mesmos arquivos, para evitar decisões de arquitetura divergentes no backend de categorias.
+4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
