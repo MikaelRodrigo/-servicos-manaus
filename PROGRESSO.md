@@ -276,3 +276,35 @@ No meio desta etapa, um `git log` revelou um commit novo (`54f1c0c`, autor "Alex
 2. Migrações `07` a `09` seguem pendentes de rodar no Neon (ver seções anteriores).
 3. Confirmar com o time/colaborador (autor do commit `54f1c0c`) se há mais trabalho em andamento nos mesmos arquivos, para evitar decisões de arquitetura divergentes no backend de categorias.
 4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
+---
+
+## Sessão de 13/07/2026 (continuação — editar categoria/subcategoria e CEP no perfil)
+
+### Pedido
+"Permitir editar a categoria, subcategoria, e o cep." Até aqui, categoria/subcategoria só podiam ser definidas uma vez, no cadastro (não existia campo para trocar depois); a edição de CEP já existia de uma sessão anterior.
+
+### O que foi feito
+
+**Backend**
+- `profissionais.repository.ts` — `AtualizacaoPerfilProfissional` ganhou `categoriaId?`/`subcategoriaId?` (mesmo espírito do trio cep/latitude/longitude: só existem JUNTOS). `atualizarPerfilProfissional` agora também atualiza `categoria_id`/`subcategoria_id` via `COALESCE` no mesmo `UPDATE`.
+- `profissionais.routes.ts` — `PATCH /profissionais/me` passa a aceitar `categoria_id`/`subcategoria_id` no corpo multipart. Validação: os dois precisam vir juntos ou nenhum (erro 400 amigável se só um vier); passam a contar também no "ao menos um campo precisa vir". Violação da FK composta (par categoria/subcategoria incoerente) vira o mesmo erro amigável já usado no cadastro (`ErroDeValidacao` traduzindo `PG_FOREIGN_KEY_VIOLATION`).
+
+**Flutter**
+- `perfil_profissional.dart` — `PerfilProfissional` ganha campo `categoria` (nome da categoria-mãe), espelhando o que o backend já devolvia desde a etapa da hierarquia mas o app ainda não lia.
+- `profissionais_service.dart` — `atualizarMeuPerfil` ganha `categoriaId`/`subcategoriaId` (enviados como string no multipart, igual ao padrão dos outros campos).
+- `editar_perfil_screen.dart` — ganhou o `SeletorCategoriaCascata` (reaproveitado do cadastro), seguindo a MESMA convenção já usada pelo campo de CEP: o seletor começa sempre vazio (nunca pré-preenchido com a categoria atual), e a categoria/especialidade atual aparece só como texto informativo abaixo ("Categoria atual: Eletricista (em: Manutenção e Reforma)"). Validação bloqueia salvar se só a categoria for escolhida sem a subcategoria. Ao salvar com sucesso, o seletor volta a ficar vazio e o texto informativo é atualizado com o novo valor.
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros.
+- Balanceamento de chaves/parênteses/colchetes (script Python, raw count + stripped) em todos os arquivos Dart alterados — OK nos dois métodos.
+- `git log --oneline -5`/`git status` checados ANTES de commitar (lição da sessão anterior) — sem commits concorrentes desta vez, só os 5 arquivos esperados no `git status`.
+- **Sincronização mount vs. Windows conferida de novo:** todos os 5 arquivos (2 backend + 3 Flutter) vieram truncados no mount depois das edições (`file`/`wc -l`/`tail` confirmaram corte no meio do conteúdo). Reescritos por inteiro via heredoc a partir do conteúdo autoritativo (lado Windows), reconferidos (`file` voltou "UTF-8 text" limpo, `wc -l` bateu com o esperado, `tail` mostrou o fim real do arquivo) antes de compilar/commitar.
+- Commit `ef5713a`.
+- Não foi possível rodar `flutter analyze`/`flutter run` neste ambiente (sem SDK Flutter instalado no sandbox) — checagem só estática (leitura manual + balanceamento) + `tsc` no backend.
+
+### Pendências para a próxima sessão
+1. Testar de verdade no Flutter: abrir "Editar meu perfil" como profissional, conferir que aparece "Categoria atual: ...", escolher uma categoria/subcategoria nova, salvar, e confirmar que o perfil público passa a mostrar a nova subcategoria/categoria.
+2. Migrações `07` a `09` seguem pendentes de rodar no Neon (bloqueiam tudo que depende de categoria/subcategoria/CEP em produção).
+3. Rodar `flutter pub get && flutter analyze` de verdade num ambiente com SDK Flutter, já que este sandbox não tem o toolchain — a verificação desta sessão ficou só em nível estático/manual do lado Flutter.
+4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
