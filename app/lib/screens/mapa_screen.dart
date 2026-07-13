@@ -25,14 +25,14 @@ import 'perfil_profissional_screen.dart';
 /// meio do Oceano Atlântico, em 0,0, antes do GPS responder).
 const _centroManaus = LatLng(-3.130130, -60.023400);
 
-/// Raios de busca oferecidos no filtro de proximidade -- em km, sempre
-/// nessa ordem (menor pro maior). Lista fechada de propósito (o pedido foi
-/// especificamente "1km, 2km, 3km, 4km ou 5km", não um slider contínuo).
-const _raiosDisponiveisKm = [1.0, 2.0, 3.0, 4.0, 5.0];
-
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
-/// não mandar o parâmetro, que já é o padrão "distancia" no backend).
+/// não mandar o parâmetro, que já é o padrão "distancia" no backend). São os
+/// TRÊS botões fixos da barra principal -- o raio de proximidade (abaixo)
+/// só faz sentido escolher "à mão" quando a ordenação é por distância; nos
+/// outros dois casos ele continua definindo até onde a busca alcança, só
+/// que sem controle visível (ver `_OpcaoRaio` e o `AnimatedCrossFade` no
+/// `build`).
 enum _OrdenacaoBusca {
   distancia('Mais próximos', null),
   melhorCustoBeneficio('Melhor custo-benefício', 'melhor_custo_beneficio'),
@@ -42,6 +42,26 @@ enum _OrdenacaoBusca {
   final String? valorApi;
 
   const _OrdenacaoBusca(this.rotulo, this.valorApi);
+}
+
+/// As faixas de raio do sub-filtro que aparece só quando a ordenação é
+/// "Mais próximos". `km` é o valor de verdade mandado pro backend
+/// (`raio_km`) -- as faixas "Até Xkm" e "Mais que 15km" são só o RÓTULO;
+/// tecnicamente toda busca aqui é "raio ≤ X" (o `ST_DWithin` do backend não
+/// muda). `maisDe15km` usa o TETO que o backend já aceita hoje
+/// (`RAIO_MAXIMO_KM`, padrão 50 -- ver backend/src/env.ts): é o mais longe
+/// que a busca consegue ir sem o servidor rejeitar o parâmetro com 400.
+enum _OpcaoRaio {
+  ate2km(2, 'Até 2km'),
+  ate5km(5, 'Até 5km'),
+  ate8km(8, 'Até 8km'),
+  ate15km(15, 'Até 15km'),
+  maisDe15km(50, 'Mais que 15km');
+
+  final double km;
+  final String rotulo;
+
+  const _OpcaoRaio(this.km, this.rotulo);
 }
 
 class MapaScreen extends StatefulWidget {
@@ -63,7 +83,13 @@ class _MapaScreenState extends State<MapaScreen> {
   // mesmo espírito de `_subcategoriaSelecionada` acima: mudar qualquer um
   // dos dois já rebusca automaticamente (ver `_aoMudarRaio`/`_aoMudarOrdenacao`),
   // sem precisar de um botão "aplicar" separado.
-  double _raioKmSelecionado = 5;
+  //
+  // `_raioSelecionado` NUNCA é resetado ao trocar de ordenação -- só a
+  // LINHA de chips que escolhe ele fica visível/invisível (requisito 4:
+  // "estado do filtro mantido de forma intuitiva"). Trocar para "Melhores
+  // avaliados" e voltar para "Mais próximos" preserva o raio que a pessoa
+  // tinha escolhido antes, em vez de voltar pro padrão toda vez.
+  _OpcaoRaio _raioSelecionado = _OpcaoRaio.ate5km;
   _OrdenacaoBusca _ordenacaoSelecionada = _OrdenacaoBusca.distancia;
 
   @override
@@ -109,7 +135,7 @@ class _MapaScreenState extends State<MapaScreen> {
     await context.read<ProfissionaisProvider>().buscarProximos(
           latitude: latitude,
           longitude: longitude,
-          raioKm: _raioKmSelecionado,
+          raioKm: _raioSelecionado.km,
           subcategoriaId: _subcategoriaSelecionada?.id,
           ordenarPor: _ordenacaoSelecionada.valorApi,
         );
@@ -127,11 +153,10 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 
   /// Mesmo espírito de `_aoMudarSubcategoria` acima -- trocar o raio ou a
-  /// ordenação já rebusca na hora, reativo, sem botão "aplicar" separado
-  /// (requisito 3 do filtro avançado).
-  void _aoMudarRaio(double raioKm) {
-    if (raioKm == _raioKmSelecionado) return;
-    setState(() => _raioKmSelecionado = raioKm);
+  /// ordenação já rebusca na hora, reativo, sem botão "aplicar" separado.
+  void _aoMudarRaio(_OpcaoRaio opcao) {
+    if (opcao == _raioSelecionado) return;
+    setState(() => _raioSelecionado = opcao);
     final posicao = context.read<LocalizacaoProvider>().posicao;
     if (posicao != null) {
       _buscar(posicao.latitude, posicao.longitude);
@@ -242,37 +267,16 @@ class _MapaScreenState extends State<MapaScreen> {
             ),
           ),
 
-          // Filtros avançados: raio de proximidade + ordenação. Chips logo
-          // abaixo da barra de busca principal (requisito 3), sempre
-          // visíveis -- diferente da especialidade (que só filtra quando a
-          // pessoa escolhe uma), aqui SEMPRE existe um raio e uma ordenação
-          // selecionados (com valores padrão: 5km, "Mais próximos").
+          // Barra principal de ordenação: só os TRÊS botões fixos pedidos
+          // (requisito 1) -- "Mais próximos", "Melhor custo-benefício",
+          // "Melhores avaliados". Nada de raio aqui; o raio virou um
+          // SUB-filtro, que só aparece quando faz sentido (ver abaixo).
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Icon(Icons.social_distance, size: 18, color: Colors.grey.shade600),
-                for (final km in _raiosDisponiveisKm)
-                  ChoiceChip(
-                    label: Text('${km.toStringAsFixed(0)} km'),
-                    selected: _raioKmSelecionado == km,
-                    onSelected: (_) => _aoMudarRaio(km),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Icon(Icons.sort, size: 18, color: Colors.grey.shade600),
                 for (final ordenacao in _OrdenacaoBusca.values)
                   ChoiceChip(
                     label: Text(ordenacao.rotulo),
@@ -281,6 +285,41 @@ class _MapaScreenState extends State<MapaScreen> {
                   ),
               ],
             ),
+          ),
+
+          // Sub-filtro de raio (requisito 2): só existe -- visualmente --
+          // quando a ordenação é "Mais próximos". `AnimatedCrossFade` faz a
+          // transição pedida no requisito 3 (entra com fade + desliza pra
+          // baixo empurrando o mapa, sai do mesmo jeito), sem precisar de
+          // `AnimatedContainer`/`AnimatedSize` manual: ele já anima altura E
+          // opacidade dos dois lados ao trocar `crossFadeState`.
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 220),
+            sizeCurve: Curves.easeInOut,
+            crossFadeState: _ordenacaoSelecionada == _OrdenacaoBusca.distancia
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            firstChild: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Icon(Icons.social_distance, size: 18, color: Colors.grey.shade600),
+                  for (final opcao in _OpcaoRaio.values)
+                    ChoiceChip(
+                      label: Text(opcao.rotulo),
+                      selected: _raioSelecionado == opcao,
+                      onSelected: (_) => _aoMudarRaio(opcao),
+                    ),
+                ],
+              ),
+            ),
+            // Placeholder de altura zero -- é o que faz o `AnimatedCrossFade`
+            // "colapsar" a linha inteira (não só esconder o conteúdo) quando
+            // a ordenação não é por distância.
+            secondChild: const SizedBox(width: double.infinity, height: 0),
           ),
           const SizedBox(height: 8),
 
