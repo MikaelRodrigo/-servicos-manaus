@@ -589,3 +589,29 @@ Achado secundário (estrutural, não a causa do bug relatado, mas risco real à 
 ### Pendências para a próxima sessão
 1. **Testar de verdade** o cenário relatado pelo usuário (raio 2km → 5km, profissionais "Diego" e "Patrícia") num dispositivo/ambiente com Flutter real e a base Neon populada — este sandbox não permite validar nem a query contra dados reais nem o comportamento do mapa.
 2. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações, se o usuário quiser isso de verdade (não só um rótulo).
+
+---
+
+## Sessão de 13/07/2026 (continuação — círculo visual do raio de busca no mapa)
+
+### Pedido
+Implementar visualização do raio de busca selecionado como um círculo (overlay) desenhado no mapa ao redor da posição do usuário: preenchimento translúcido + borda mais escura, transição suave ao trocar de raio (2km → 15km expandindo, não saltando), câmera centralizando no usuário com zoom ajustado para o círculo ficar bem visível a cada troca, e garantia de que o círculo é só elemento visual (não interfere na busca real).
+
+### O que foi feito
+`app/lib/screens/mapa_screen.dart`:
+- Novo `CircleLayer`/`CircleMarker` (API nativa do `flutter_map ^8.3.1`, verificada via pesquisa contra pub.dev antes de escrever o código) inserido entre `TileLayer` e `MarkerLayer` -- desenha atrás dos pinos dos profissionais, nunca por cima.
+- Estilo: `color: corRaio.withValues(alpha: 0.16)` (preenchimento) + `borderColor: corRaio.withValues(alpha: 0.65)` (borda) -- mesma cor, contraste de opacidade dá a leitura de "borda mais escura". `corRaio` vem de `Theme.of(context).colorScheme.primary` (tema central do app), não fixada no código.
+- Animação: `TweenAnimationBuilder<double>` (450ms, `Curves.easeInOut`) interpolando o raio em metros -- ao trocar de faixa, o círculo expande/encolhe suavemente em vez de saltar de tamanho.
+- `_ajustarCameraParaResultados` (da sessão anterior) foi substituída por `_ajustarCameraParaRaio`: em vez de enquadrar a câmera pelos PONTOS dos profissionais retornados, agora enquadra pela bounding box do próprio CÍRCULO (centro ± raio, convertido de metros para graus com uma aproximação esférica -- só usada para enquadrar câmera, nunca para calcular distância real, que continua 100% no `ST_DWithin` do backend). Isso: (1) sempre centraliza no usuário e ajusta o zoom pro círculo ficar visível, cumprindo o pedido; (2) como a "cerca" é exata, qualquer profissional no resultado já está dentro do círculo por construção -- então caber o círculo também garante caber todos eles; (3) elimina o caso especial que existia antes para "lista vazia" (círculo sempre tem área > 0, já que o menor raio é 2km).
+- Círculo é puramente visual: não lê nem escreve nada relacionado à consulta ao backend, só reflete na tela o mesmo raio já usado na busca real.
+
+### Verificação feita
+- **Corrupção de mount de novo** (mesmo bug recorrente desta sessão inteira): depois de editar via `Read`/`Edit`, o arquivo no mount bash apareceu truncado no meio de uma palavra (`RichAttributionWidg`) -- reescrito por inteiro via heredoc a partir do conteúdo autoritativo (587 linhas), reconferido (`wc -l`/`tail`/`file`).
+- Balanceamento de chaves/parênteses/colchetes (script Python, com tratamento de comentários e strings) -- OK.
+- `git diff --stat` conferido antes do commit -- só `mapa_screen.dart`, 85 inserções/24 remoções, batendo com a mudança pretendida (nenhum outro arquivo tocado).
+- Commit `1eb8e96`.
+- **Não foi possível rodar `flutter run` neste sandbox** (sem SDK Flutter) -- a API do `CircleLayer`/`CircleMarker` foi verificada por pesquisa (não por compilação real), e o comportamento visual (animação, cores, enquadramento de câmera) não pôde ser observado na prática.
+
+### Pendências para a próxima sessão
+1. **Testar de verdade** no Flutter: selecionar diferentes raios e confirmar visualmente o círculo (cor, transparência, borda), a animação de expansão/encolhimento, e o enquadramento automático da câmera.
+2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
