@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../data/models/categoria.dart';
 import '../data/models/usuario.dart';
 import '../data/services/api_client.dart';
 import '../data/services/auth_service.dart';
+import '../data/services/categorias_service.dart';
 import '../providers/auth_provider.dart';
+import '../widgets/seletor_categoria_cascata.dart';
 
 class CadastroScreen extends StatefulWidget {
   const CadastroScreen({super.key});
@@ -29,12 +32,42 @@ class _CadastroScreenState extends State<CadastroScreen> {
   // Campos PF.
   final _nome = TextEditingController();
   final _cpf = TextEditingController();
-  final _profissao = TextEditingController(); // só profissional
 
   // Campos PJ.
   final _razaoSocial = TextEditingController();
   final _cnpj = TextEditingController();
-  final _categoriaAtuacao = TextEditingController(); // só profissional
+
+  // Categoria de atuação -- só profissional (PF ou PJ, o seletor é o
+  // mesmo para os dois). Substitui os antigos campos de texto livre
+  // "profissão"/"categoria de atuação" (ver migração 09 no backend).
+  List<Categoria> _categorias = [];
+  bool _carregandoCategorias = true;
+  Categoria? _categoriaSelecionada;
+  Subcategoria? _subcategoriaSelecionada;
+  String? _erroCategoria;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarCategorias();
+  }
+
+  Future<void> _carregarCategorias() async {
+    try {
+      final categorias = await CategoriasService.instancia.listarCategorias();
+      if (!mounted) return;
+      setState(() {
+        _categorias = categorias;
+        _carregandoCategorias = false;
+      });
+    } on ApiException catch (erro) {
+      if (!mounted) return;
+      setState(() => _carregandoCategorias = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível carregar as categorias: ${erro.mensagem}')),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -45,10 +78,8 @@ class _CadastroScreenState extends State<CadastroScreen> {
       _contato,
       _nome,
       _cpf,
-      _profissao,
       _razaoSocial,
       _cnpj,
-      _categoriaAtuacao,
     ]) {
       c.dispose();
     }
@@ -99,6 +130,20 @@ class _CadastroScreenState extends State<CadastroScreen> {
       return;
     }
 
+    // Categoria/subcategoria são obrigatórias para QUALQUER profissional
+    // (PF ou PJ) -- é o dado que alimenta a busca por proximidade e o
+    // perfil público. Sem seleção completa, nem chega a bater no backend
+    // (que também recusaria, já que os dois campos são obrigatórios lá).
+    if (_tipoConta == Papel.profissional &&
+        (_categoriaSelecionada == null || _subcategoriaSelecionada == null)) {
+      setState(() => _erroCategoria = 'Selecione a categoria e a especialidade.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecione a categoria e a especialidade de atuação.')),
+      );
+      return;
+    }
+    setState(() => _erroCategoria = null);
+
     setState(() => _enviando = true);
 
     try {
@@ -109,21 +154,20 @@ class _CadastroScreenState extends State<CadastroScreen> {
         'contato': _apenasDigitos(_contato.text),
       };
 
+      if (_tipoConta == Papel.profissional) {
+        corpo['categoria_id'] = _categoriaSelecionada!.id;
+        corpo['subcategoria_id'] = _subcategoriaSelecionada!.id;
+      }
+
       if (_tipoPessoa == 'PF') {
         corpo['nome'] = _nome.text.trim();
         corpo['cpf'] = _apenasDigitos(_cpf.text);
         if (_tipoConta == Papel.profissional) {
           corpo['data_nascimento'] = _formatarData(_dataNascimento!);
-          if (_profissao.text.trim().isNotEmpty) {
-            corpo['profissao'] = _profissao.text.trim();
-          }
         }
       } else {
         corpo['razao_social'] = _razaoSocial.text.trim();
         corpo['cnpj'] = _apenasDigitos(_cnpj.text);
-        if (_tipoConta == Papel.profissional && _categoriaAtuacao.text.trim().isNotEmpty) {
-          corpo['categoria_atuacao'] = _categoriaAtuacao.text.trim();
-        }
       }
 
       if (_tipoConta == Papel.cliente) {
@@ -260,15 +304,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                             : 'Nascimento: ${_formatarData(_dataNascimento!)}',
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _profissao,
-                      decoration: const InputDecoration(
-                        labelText: 'Profissão (opcional)',
-                        hintText: 'Eletricista, encanador...',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
                   ],
                 ] else ...[
                   TextFormField(
@@ -286,17 +321,36 @@ class _CadastroScreenState extends State<CadastroScreen> {
                     validator: (v) =>
                         (v == null || _apenasDigitos(v).length != 14) ? 'CNPJ deve ter 14 dígitos.' : null,
                   ),
-                  if (ehProfissional) ...[
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _categoriaAtuacao,
-                      decoration: const InputDecoration(
-                        labelText: 'Categoria de atuação (opcional)',
-                        hintText: 'Climatização, construção...',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
+                ],
+
+                // Categoria de atuação -- comum a PF e PJ, por isso mora
+                // FORA do if/else acima. Único seletor em cascata, sem
+                // texto livre (ver widgets/seletor_categoria_cascata.dart).
+                if (ehProfissional) ...[
+                  const SizedBox(height: 12),
+                  _carregandoCategorias
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      : SeletorCategoriaCascata(
+                          categorias: _categorias,
+                          categoriaSelecionada: _categoriaSelecionada,
+                          subcategoriaSelecionada: _subcategoriaSelecionada,
+                          errorText: _erroCategoria,
+                          onCategoriaAlterada: (categoria) {
+                            setState(() {
+                              _categoriaSelecionada = categoria;
+                              _erroCategoria = null;
+                            });
+                          },
+                          onSubcategoriaAlterada: (subcategoria) {
+                            setState(() {
+                              _subcategoriaSelecionada = subcategoria;
+                              _erroCategoria = null;
+                            });
+                          },
+                        ),
                 ],
 
                 const SizedBox(height: 24),

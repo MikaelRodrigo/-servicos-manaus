@@ -5,6 +5,7 @@ import {
   numeroObrigatorio,
   numeroOpcional,
   textoOpcional,
+  inteiroPositivoOpcional,
   apenasDigitos,
   entre,
   uuidObrigatorio,
@@ -24,10 +25,12 @@ export const profissionaisRouter = Router();
  * Query params:
  *   latitude   (obrigatório)  -3.13013
  *   longitude  (obrigatório)  -60.02340
- *   raio_km    (opcional)     padrão 5, máximo RAIO_MAXIMO_KM
- *   profissao  (opcional)     "eletricista"
- *   pagina     (opcional)     padrão 1
- *   limite     (opcional)     padrão 20, máximo 100
+ *   raio_km         (opcional)  padrão 5, máximo RAIO_MAXIMO_KM
+ *   profissao       (opcional)  "eletricista" -- busca livre (legado)
+ *   subcategoria_id (opcional)  17 -- filtro EXATO, o que o app usa hoje
+ *                               (ver BuscaSubcategoriaAutocomplete no Flutter)
+ *   pagina          (opcional)  padrão 1
+ *   limite          (opcional)  padrão 20, máximo 100
  *
  * Exemplo:
  *   /profissionais/proximos?latitude=-3.13013&longitude=-60.02340&raio_km=5
@@ -66,6 +69,7 @@ profissionaisRouter.get(
       );
 
       const profissao = textoOpcional(req.query.profissao, 'profissao', 100);
+      const subcategoriaId = inteiroPositivoOpcional(req.query.subcategoria_id, 'subcategoria_id');
 
       const pagina = entre(numeroOpcional(req.query.pagina, 'pagina', 1), 1, 1000, 'pagina');
       const limite = entre(numeroOpcional(req.query.limite, 'limite', 20), 1, 100, 'limite');
@@ -88,6 +92,7 @@ profissionaisRouter.get(
         longitude,
         raioMetros,
         profissao,
+        subcategoriaId,
         limite,
         offset,
       });
@@ -100,7 +105,13 @@ profissionaisRouter.get(
          você não quebra o app dos usuários.
          --------------------------------------------------------------- */
       return res.json({
-        parametros: { latitude, longitude, raio_km: raioKm, profissao: profissao ?? null },
+        parametros: {
+          latitude,
+          longitude,
+          raio_km: raioKm,
+          profissao: profissao ?? null,
+          subcategoria_id: subcategoriaId ?? null,
+        },
         pagina,
         limite,
         total_retornado: profissionais.length,

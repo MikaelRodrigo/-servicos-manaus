@@ -7,6 +7,7 @@ import {
   dataObrigatoria,
   tipoPessoaObrigatorio,
   numeroDoBody,
+  inteiroPositivoObrigatorio,
   entre,
   ErroDeValidacao,
   ErroDeConflito,
@@ -14,7 +15,11 @@ import {
 import { gerarHashSenha, conferirSenha } from '../utils/senha';
 import { gerarToken, Papel } from '../utils/jwt';
 import { exigirAutenticacao } from '../middlewares/autenticacao';
-import { ehErroDePostgres, PG_UNIQUE_VIOLATION } from '../utils/erros-postgres';
+import {
+  ehErroDePostgres,
+  PG_UNIQUE_VIOLATION,
+  PG_FOREIGN_KEY_VIOLATION,
+} from '../utils/erros-postgres';
 import {
   buscarClientePorEmail,
   buscarProfissionalPorEmail,
@@ -104,8 +109,14 @@ authRouter.post(
 /* ============================================================================
    POST /auth/cadastro/profissional
 
-   Body PF:  { tipo_pessoa: "PF", email, senha, contato, nome, cpf, data_nascimento, profissao? }
-   Body PJ:  { tipo_pessoa: "PJ", email, senha, contato, razao_social, cnpj, categoria_atuacao?, data_criacao? }
+   Body PF:  { tipo_pessoa: "PF", email, senha, contato, nome, cpf, data_nascimento, categoria_id, subcategoria_id }
+   Body PJ:  { tipo_pessoa: "PJ", email, senha, contato, razao_social, cnpj, categoria_id, subcategoria_id, data_criacao? }
+
+   `categoria_id`/`subcategoria_id` (migração 09) são OBRIGATÓRIOS para os
+   dois tipos de pessoa -- vêm do seletor em cascata do app (GET /categorias
+   alimenta a lista), nunca de texto livre digitado. Isso substitui os
+   antigos `profissao` (PF) e `categoria_atuacao` (PJ), que ficaram
+   deprecados no banco (ver migração 09).
    ========================================================================= */
 authRouter.post(
   '/cadastro/profissional',
@@ -120,6 +131,11 @@ authRouter.post(
       const senhaHash = await gerarHashSenha(senha);
       const coordenadas = lerCoordenadasOpcionais(body);
 
+      // Validados aqui em cima porque são idênticos para PF e PJ -- não faz
+      // sentido duplicar a chamada dentro dos dois ramos abaixo.
+      const categoriaId = inteiroPositivoObrigatorio(body.categoria_id, 'categoria_id');
+      const subcategoriaId = inteiroPositivoObrigatorio(body.subcategoria_id, 'subcategoria_id');
+
       const criado =
         tipoPessoa === 'PF'
           ? await criarProfissionalPF({
@@ -129,9 +145,8 @@ authRouter.post(
               nome: textoObrigatorio(body.nome, 'nome', { min: 3, max: 150 }),
               cpf: apenasDigitos(body.cpf, 'cpf', 11),
               dataNascimento: dataObrigatoria(body.data_nascimento, 'data_nascimento'),
-              profissao: body.profissao
-                ? textoObrigatorio(body.profissao, 'profissao', { min: 2, max: 100 })
-                : undefined,
+              categoriaId,
+              subcategoriaId,
               ...coordenadas,
             })
           : await criarProfissionalPJ({
@@ -143,12 +158,8 @@ authRouter.post(
                 max: 200,
               }),
               cnpj: apenasDigitos(body.cnpj, 'cnpj', 14),
-              categoriaAtuacao: body.categoria_atuacao
-                ? textoObrigatorio(body.categoria_atuacao, 'categoria_atuacao', {
-                    min: 2,
-                    max: 100,
-                  })
-                : undefined,
+              categoriaId,
+              subcategoriaId,
               dataCriacao:
                 body.data_criacao !== undefined
                   ? dataObrigatoria(body.data_criacao, 'data_criacao')
@@ -163,6 +174,16 @@ authRouter.post(
       if (ehErroDePostgres(erro) && erro.code === PG_UNIQUE_VIOLATION) {
         return next(
           new ErroDeConflito('Já existe um profissional cadastrado com este e-mail/CPF/CNPJ.'),
+        );
+      }
+      // `subcategoria_id` não existe, ou existe mas não pertence à
+      // `categoria_id` informada -- a FK composta da migração 09
+      // (fk_profissionais_subcategoria_categoria) recusa o INSERT nos dois
+      // casos. Traduzimos para uma mensagem que o app consegue mostrar,
+      // em vez do erro cru do Postgres.
+      if (ehErroDePostgres(erro) && erro.code === PG_FOREIGN_KEY_VIOLATION) {
+        return next(
+          new ErroDeValidacao('Categoria/subcategoria inválida. Selecione novamente na lista.'),
         );
       }
       return next(erro);

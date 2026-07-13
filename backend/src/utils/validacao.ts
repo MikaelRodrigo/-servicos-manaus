@@ -86,6 +86,20 @@ export function numeroOpcional(valor: unknown, campo: string, padrao: number): n
   return numeroObrigatorio(valor, campo);
 }
 
+/**
+ * Inteiro positivo OPCIONAL vindo de QUERY STRING -- ex.: `?subcategoria_id=17`.
+ * Devolve `undefined` quando ausente, em vez de lançar (diferente de
+ * `inteiroPositivoObrigatorio`, que é para BODY de POST e não aceita ausência).
+ */
+export function inteiroPositivoOpcional(valor: unknown, campo: string): number | undefined {
+  if (valor === undefined || valor === null || valor === '') return undefined;
+  const n = numeroObrigatorio(valor, campo);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new ErroDeValidacao(`O parâmetro "${campo}" deve ser um número inteiro positivo.`);
+  }
+  return n;
+}
+
 export function entre(n: number, min: number, max: number, campo: string): number {
   if (n < min || n > max) {
     throw new ErroDeValidacao(`"${campo}" deve estar entre ${min} e ${max}. Recebido: ${n}.`);
@@ -225,6 +239,20 @@ export function numeroDoBody(valor: unknown, campo: string): number {
   }
 
   throw new ErroDeValidacao(`O campo "${campo}" deve ser um número.`);
+}
+
+/**
+ * Inteiro positivo vindo de BODY JSON -- ex.: `categoria_id`, `subcategoria_id`.
+ * Mesma ideia de `notaObrigatoria` (número inteiro + faixa), mas sem teto
+ * fixo: quem chama decide se o valor existe de verdade consultando o banco
+ * (a FK cuida disso -- ver `PG_FOREIGN_KEY_VIOLATION` em erros-postgres.ts).
+ */
+export function inteiroPositivoObrigatorio(valor: unknown, campo: string): number {
+  const n = numeroDoBody(valor, campo);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser um número inteiro positivo.`);
+  }
+  return n;
 }
 
 /** enum literal 'PF' | 'PJ' -- qualquer outra coisa é 400. */
