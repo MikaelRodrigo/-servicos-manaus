@@ -176,3 +176,34 @@ Pesquisa mostrou que `latitude`/`longitude` de `profissionais`/`clientes` NUNCA 
 4. Confirmar visualmente que a foto do cliente aparece nos cards de avaliação do portfólio (depende de o cliente ter preenchido foto de perfil — ver sessão anterior).
 5. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
 
+---
+
+## Sessão de 12/07/2026 (continuação 4 — corrigir geocodificação de CEP)
+
+### Pedido
+Usuário testou o CEP `69043000` (Manaus, válido) na tela de editar perfil e recebeu erro: "Não foi possível encontrar a localização exata desse CEP."
+
+### Diagnóstico
+A BrasilAPI v2 devolve endereço + coordenada numa chamada só, mas a coordenada vem da geocodificação embutida dela via Nominatim/OpenStreetMap — cuja cobertura endereço-a-ponto no Norte do Brasil é bem mais fraca que no Sul/Sudeste. Resultado: endereço encontrado, `location.coordinates` vazio, rota falha mesmo com CEP correto.
+
+### O que foi feito
+`backend/src/services/cep.ts` reescrito, separando as duas responsabilidades:
+- **ViaCEP** (`viacep.com.br`) — só busca o endereço (rua/bairro/cidade/UF); não geocodifica, então não falha desse jeito.
+- **Nominatim** (`nominatim.openstreetmap.org`) — geocodificação feita diretamente por nós, com escada de 3 tentativas cada vez mais genéricas: rua+bairro+cidade → bairro+cidade → só cidade-UF. Cidade inteira quase sempre geocodifica, então o pior caso vira "aparece no centro da cidade" em vez de falhar.
+- Timeout de 8s por chamada externa (`AbortController`), como antes.
+- Assinatura exportada (`buscarLocalizacaoPorCep(cep): Promise<{latitude, longitude, enderecoFormatado}>`) não mudou — nenhum outro arquivo (rota/repositório) precisou ser alterado.
+
+### Incidente durante o commit (resolvido)
+No primeiro commit desta etapa, `git add -A` reportou `error: bad signature 0x00000000` / `fatal: index file corrupt`, mas mesmo assim produziu um commit (`8d6e9ba`) — só que **vazio de conteúdo** (a árvore desse commit tinha 0 arquivos, um `git diff` contra o commit anterior mostrava só remoções). Ou seja, o índice corrompido fez o commit apagar o repositório inteiro do ponto de vista do Git, mesmo a mensagem do commit estando correta.
+
+**Correção:** `git reset --hard HEAD~1` para voltar ao último commit bom (`b80c22a`, 197 arquivos íntegros), reaplicar o conteúdo novo de `cep.ts` e commitar de novo — desta vez com `git add` apontando só para o arquivo específico (não `-A`), evitando depender do índice completo. Novo commit: `abd2927`. Verificado depois: `git ls-tree -r HEAD | wc -l` = 197 (mesma contagem de antes), `git status` limpo, diff do commit mostra só o `cep.ts` (179 inserções, 116 remoções, 1 arquivo).
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros.
+- `git log --oneline` e `git ls-tree -r HEAD --name-only | wc -l` confirmando que o repositório está íntegro (197 arquivos) e o commit `abd2927` contém só a mudança esperada.
+- Não foi possível testar a chamada real ao ViaCEP/Nominatim neste ambiente (sandbox sem acesso de rede a domínios externos).
+
+### Pendências para a próxima sessão
+1. **Rodar as migrações `07` e `08` no Neon** (e confirmar `04`–`06` já aplicadas) — segue pendente de sessões anteriores.
+2. Testar de verdade o fluxo de CEP (agora ViaCEP + Nominatim) a partir do backend rodando fora deste sandbox, com CEPs reais de Manaus — inclusive o `69043000` que falhou antes.
+3. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
