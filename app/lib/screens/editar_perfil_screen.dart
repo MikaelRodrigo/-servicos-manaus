@@ -265,7 +265,6 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Sobre mim',
                   hintText: 'Conte um pouco sobre sua experiência e seus serviços...',
-                  border: OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),
               ),
@@ -283,7 +282,6 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
                   labelText: 'CEP',
                   hintText: 'Ex.: 69010030',
                   helperText: 'Define onde você aparece no mapa para os clientes.',
-                  border: OutlineInputBorder(),
                 ),
               ),
               if (_enderecoAtualExibicao != null && _enderecoAtualExibicao!.trim().isNotEmpty) ...[

@@ -103,9 +103,9 @@ class _ServicosScreenState extends State<ServicosScreen> {
             }
 
             return ListView.separated(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(16),
               itemCount: servicos.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, indice) {
                 final servico = servicos[indice];
                 final outroNome =

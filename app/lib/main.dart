@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'core/theme/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/localizacao_provider.dart';
 import 'providers/profissionais_provider.dart';
@@ -30,10 +31,10 @@ class ServicosManausApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Serviços Manaus',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-          useMaterial3: true,
-        ),
+        // Todo o visual (cores, raios, sombras, tipografia) vem de um único
+        // lugar -- `core/theme/app_theme.dart` -- para que o app inteiro
+        // fique consistente sem precisar repetir estilo tela por tela.
+        theme: construirTemaClaro(),
         localizationsDelegates: const [
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,

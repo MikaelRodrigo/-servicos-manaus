@@ -262,13 +262,14 @@ class _ServicoDetalheScreenState extends State<ServicoDetalheScreen> {
   Widget _botaoAvaliar({required bool jaAvaliou, required Servico servico}) {
     if (jaAvaliou) {
       return const Card(
-        color: Color(0xFFE8F5E9),
+        color: Color(0xFFF0F9F6),
+        elevation: 0,
         child: Padding(
-          padding: EdgeInsets.all(16),
+          padding: EdgeInsets.all(18),
           child: Row(
             children: [
-              Icon(Icons.check_circle, color: Colors.green),
-              SizedBox(width: 8),
+              Icon(Icons.check_circle_outline, color: Color(0xFF12A594)),
+              SizedBox(width: 10),
               Expanded(child: Text('Você já avaliou este serviço. Obrigado!')),
             ],
           ),

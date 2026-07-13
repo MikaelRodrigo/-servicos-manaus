@@ -185,7 +185,6 @@ class _AvaliacaoScreenState extends State<AvaliacaoScreen> {
               maxLines: 4,
               decoration: const InputDecoration(
                 labelText: 'Comentário (opcional)',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
@@ -274,13 +273,13 @@ class _BotaoAdicionarFoto extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 80,
         height: 80,
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade400),
-          borderRadius: BorderRadius.circular(8),
+          color: const Color(0xFFF1F3F5),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: const Icon(Icons.add_a_photo_outlined, color: Colors.grey),
       ),
@@ -300,7 +299,7 @@ class _MiniaturaFoto extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           // `foto.readAsBytes()` funciona igual em mobile e web -- é por
           // isso que o app inteiro usa XFile + bytes em vez de dart:io File
           // (que nem existe no navegador) para lidar com imagens escolhidas.

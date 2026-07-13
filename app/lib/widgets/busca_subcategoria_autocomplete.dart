@@ -141,7 +141,6 @@ class _BuscaSubcategoriaAutocompleteState extends State<BuscaSubcategoriaAutocom
               decoration: InputDecoration(
                 hintText: widget.hintText,
                 prefixIcon: const Icon(Icons.search),
-                border: const OutlineInputBorder(),
                 isDense: true,
               ),
             );
@@ -151,8 +150,9 @@ class _BuscaSubcategoriaAutocompleteState extends State<BuscaSubcategoriaAutocom
             return Align(
               alignment: Alignment.topLeft,
               child: Material(
-                elevation: 4,
-                borderRadius: BorderRadius.circular(8),
+                elevation: 6,
+                shadowColor: Colors.black.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(14),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 280),
                   child: SizedBox(

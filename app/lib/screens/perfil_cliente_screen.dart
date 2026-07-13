@@ -214,7 +214,6 @@ class _PerfilClienteScreenState extends State<PerfilClienteScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Contato (telefone/WhatsApp)',
                   hintText: '92988887777',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
@@ -226,7 +225,6 @@ class _PerfilClienteScreenState extends State<PerfilClienteScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Endereço fixo',
                   hintText: 'Rua, número, bairro...',
-                  border: OutlineInputBorder(),
                   alignLabelWithHint: true,
                 ),
               ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/theme/app_theme.dart';
 import '../data/models/usuario.dart';
 import '../providers/auth_provider.dart';
 import 'cadastro_screen.dart';
@@ -58,14 +59,14 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(28),
             child: Form(
               key: _formKey,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.handyman, size: 72, color: Colors.teal),
+                  const Icon(Icons.handyman, size: 72, color: AppColors.destaque),
                   const SizedBox(height: 8),
                   Text(
                     'Serviços Manaus',
@@ -105,7 +106,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: const InputDecoration(
                       labelText: 'E-mail',
                       prefixIcon: Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(),
                     ),
                     validator: (valor) {
                       if (valor == null || valor.trim().isEmpty) {
@@ -126,7 +126,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: InputDecoration(
                       labelText: 'Senha',
                       prefixIcon: const Icon(Icons.lock_outline),
-                      border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
                         icon: Icon(_senhaVisivel ? Icons.visibility_off : Icons.visibility),
                         onPressed: () => setState(() => _senhaVisivel = !_senhaVisivel),

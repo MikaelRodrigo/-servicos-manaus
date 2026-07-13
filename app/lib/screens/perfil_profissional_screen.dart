@@ -74,7 +74,6 @@ class _PerfilProfissionalScreenState extends State<PerfilProfissionalScreen> {
           maxLines: 3,
           decoration: const InputDecoration(
             labelText: 'Descreva o serviço (opcional)',
-            border: OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -520,7 +519,7 @@ class _CartaoPortfolioState extends State<_CartaoPortfolio> {
           ],
 
           const SizedBox(height: 14),
-          Divider(height: 1, color: Colors.grey.shade200),
+          const Divider(height: 1),
         ],
       ),
     );

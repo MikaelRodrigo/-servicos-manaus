@@ -86,9 +86,8 @@ class SeletorCategoriaCascata extends StatelessWidget {
     return InputDecorator(
       decoration: InputDecoration(
         labelText: labelText,
-        border: const OutlineInputBorder(),
         errorText: errorText,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
       child: !temCategoria
           ? InkWell(
@@ -234,7 +233,6 @@ class _FolhaDeBuscaState<T> extends State<_FolhaDeBusca<T>> {
                   decoration: const InputDecoration(
                     hintText: 'Buscar...',
                     prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
                     isDense: true,
                   ),
                 ),

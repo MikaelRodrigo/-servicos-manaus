@@ -210,7 +210,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
       appBar: AppBar(title: const Text('Criar conta')),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(28),
           child: Form(
             key: _formKey,
             child: Column(
@@ -239,7 +239,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 TextFormField(
                   controller: _email,
                   keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: 'E-mail', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'E-mail'),
                   validator: (v) => (v == null || !v.contains('@')) ? 'E-mail inválido.' : null,
                 ),
                 const SizedBox(height: 12),
@@ -250,7 +250,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                   decoration: const InputDecoration(
                     labelText: 'Senha',
                     helperText: 'Mínimo 8 caracteres, com letras e números.',
-                    border: OutlineInputBorder(),
                   ),
                   validator: (v) => (v == null || v.length < 8) ? 'Senha muito curta.' : null,
                 ),
@@ -259,8 +258,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 TextFormField(
                   controller: _confirmarSenha,
                   obscureText: true,
-                  decoration:
-                      const InputDecoration(labelText: 'Confirmar senha', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'Confirmar senha'),
                   validator: (v) => (v == null || v.isEmpty) ? 'Confirme a senha.' : null,
                 ),
                 const SizedBox(height: 12),
@@ -271,7 +269,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                   decoration: const InputDecoration(
                     labelText: 'WhatsApp / telefone',
                     hintText: '92988887777',
-                    border: OutlineInputBorder(),
                   ),
                   validator: (v) =>
                       (v == null || _apenasDigitos(v).length < 10) ? 'Telefone inválido.' : null,
@@ -281,15 +278,14 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 if (ehPF) ...[
                   TextFormField(
                     controller: _nome,
-                    decoration:
-                        const InputDecoration(labelText: 'Nome completo', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'Nome completo'),
                     validator: (v) => (v == null || v.trim().length < 3) ? 'Informe seu nome.' : null,
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _cpf,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'CPF', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'CPF'),
                     validator: (v) =>
                         (v == null || _apenasDigitos(v).length != 11) ? 'CPF deve ter 11 dígitos.' : null,
                   ),
@@ -308,8 +304,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 ] else ...[
                   TextFormField(
                     controller: _razaoSocial,
-                    decoration:
-                        const InputDecoration(labelText: 'Razão social', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'Razão social'),
                     validator: (v) =>
                         (v == null || v.trim().length < 2) ? 'Informe a razão social.' : null,
                   ),
@@ -317,7 +312,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
                   TextFormField(
                     controller: _cnpj,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'CNPJ', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'CNPJ'),
                     validator: (v) =>
                         (v == null || _apenasDigitos(v).length != 14) ? 'CNPJ deve ter 14 dígitos.' : null,
                   ),
