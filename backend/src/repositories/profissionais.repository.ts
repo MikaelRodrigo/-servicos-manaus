@@ -13,7 +13,15 @@ export interface FiltroProximidade {
   latitude: number;
   longitude: number;
   raioMetros: number;
+  /** Busca livre (fuzzy) por nome de categoria/subcategoria -- ver Seção "busca de subcategoria" no app. */
   profissao?: string;
+  /**
+   * Filtro EXATO por subcategoria -- alimentado pelo `BuscaSubcategoriaAutocomplete`
+   * do app (cliente escolhe da lista, nunca digita livre). Quando presente,
+   * tem precedência sobre `profissao`: só entra quem tem exatamente essa
+   * subcategoria, sem aproximação nenhuma.
+   */
+  subcategoriaId?: number;
   limite: number;
   offset: number;
 }
@@ -105,17 +113,21 @@ export async function buscarProximos(
       -- Profissional sem coordenada não entra no mapa.
       AND p.localizacao IS NOT NULL
 
-      -- Filtro opcional (busca livre digitada pelo CLIENTE no mapa -- não
-      -- confundir com o cadastro do profissional, que não aceita mais
-      -- texto livre). Quando $4 é NULL, a condição inteira vira TRUE e o
-      -- filtro simplesmente não se aplica. Casa tanto contra a subcategoria
-      -- ("barbeiro") quanto contra a categoria ("beleza"), para quem digitar
-      -- o termo mais genérico.
+      -- Filtro textual livre (legado -- mantido por compatibilidade, mas o
+      -- app não digita mais texto solto: ver BuscaSubcategoriaAutocomplete,
+      -- que só manda `subcategoria_id` exato, filtrado abaixo). Quando $4 é
+      -- NULL, a condição inteira vira TRUE e o filtro não se aplica. Casa
+      -- tanto contra a subcategoria ("barbeiro") quanto contra a categoria
+      -- ("beleza"), para quem digitar o termo mais genérico.
       AND (
         $4::text IS NULL
         OR unaccent(lower(COALESCE(sc.nome, ''))) LIKE '%' || unaccent(lower($4::text)) || '%'
         OR unaccent(lower(COALESCE(c.nome, '')))  LIKE '%' || unaccent(lower($4::text)) || '%'
       )
+
+      -- Filtro EXATO por subcategoria (o que o mapa usa de verdade hoje).
+      -- Sem aproximação: só entra quem tem exatamente essa subcategoria_id.
+      AND ($7::int IS NULL OR p.subcategoria_id = $7::int)
 
     ORDER BY p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
     LIMIT $5
@@ -133,6 +145,7 @@ export async function buscarProximos(
     filtro.profissao ?? null, // $4
     filtro.limite, // $5
     filtro.offset, // $6
+    filtro.subcategoriaId ?? null, // $7
   ];
 
   const { rows } = await pool.query<ProfissionalProximo>(sql, valores);
