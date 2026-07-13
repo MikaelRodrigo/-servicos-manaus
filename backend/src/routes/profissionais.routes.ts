@@ -30,12 +30,19 @@ export const profissionaisRouter = Router();
  *   profissao       (opcional)  "eletricista" -- busca livre (legado)
  *   subcategoria_id (opcional)  17 -- filtro EXATO, o que o app usa hoje
  *                               (ver BuscaSubcategoriaAutocomplete no Flutter)
+ *   ordenar_por     (opcional)  padrão "distancia" -- uma das três opções
+ *                               abaixo, ver ORDENACOES_VALIDAS:
+ *                                 distancia               (padrão, mais perto primeiro)
+ *                                 melhor_custo_beneficio   (média do critério "econômico" das avaliações)
+ *                                 melhores_avaliados       (média geral das avaliações)
  *   pagina          (opcional)  padrão 1
  *   limite          (opcional)  padrão 20, máximo 100
  *
  * Exemplo:
- *   /profissionais/proximos?latitude=-3.13013&longitude=-60.02340&raio_km=5
+ *   /profissionais/proximos?latitude=-3.13013&longitude=-60.02340&raio_km=5&ordenar_por=melhores_avaliados
  */
+const ORDENACOES_VALIDAS = ['distancia', 'melhor_custo_beneficio', 'melhores_avaliados'] as const;
+type Ordenacao = (typeof ORDENACOES_VALIDAS)[number];
 profissionaisRouter.get(
   '/proximos',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -72,6 +79,23 @@ profissionaisRouter.get(
       const profissao = textoOpcional(req.query.profissao, 'profissao', 100);
       const subcategoriaId = inteiroPositivoOpcional(req.query.subcategoria_id, 'subcategoria_id');
 
+      // Sem validador genérico de "enum" em validacao.ts hoje -- uma lista
+      // fechada + `includes` já resolve, sem precisar criar um validador
+      // novo só para este caso único.
+      const ordenarPorBruto = req.query.ordenar_por;
+      let ordenarPor: Ordenacao = 'distancia';
+      if (ordenarPorBruto !== undefined) {
+        if (
+          typeof ordenarPorBruto !== 'string' ||
+          !ORDENACOES_VALIDAS.includes(ordenarPorBruto as Ordenacao)
+        ) {
+          throw new ErroDeValidacao(
+            `"ordenar_por" precisa ser um de: ${ORDENACOES_VALIDAS.join(', ')}.`,
+          );
+        }
+        ordenarPor = ordenarPorBruto as Ordenacao;
+      }
+
       const pagina = entre(numeroOpcional(req.query.pagina, 'pagina', 1), 1, 1000, 'pagina');
       const limite = entre(numeroOpcional(req.query.limite, 'limite', 20), 1, 100, 'limite');
 
@@ -96,6 +120,7 @@ profissionaisRouter.get(
         subcategoriaId,
         limite,
         offset,
+        ordenarPor,
       });
 
       /* ---------------------------------------------------------------
@@ -112,6 +137,7 @@ profissionaisRouter.get(
           raio_km: raioKm,
           profissao: profissao ?? null,
           subcategoria_id: subcategoriaId ?? null,
+          ordenar_por: ordenarPor,
         },
         pagina,
         limite,

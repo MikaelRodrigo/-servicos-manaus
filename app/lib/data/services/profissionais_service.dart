@@ -23,6 +23,10 @@ class ProfissionaisService {
     double raioKm = 5,
     String? profissao,
     int? subcategoriaId,
+    /// Uma de `'distancia'` (padrão), `'melhor_custo_beneficio'` ou
+    /// `'melhores_avaliados'` -- ver `ordenar_por` em
+    /// profissionais.routes.ts no backend. `null` equivale a `'distancia'`.
+    String? ordenarPor,
   }) async {
     final resposta = await _api.get(
       '/profissionais/proximos',
@@ -33,6 +37,7 @@ class ProfissionaisService {
         'raio_km': raioKm,
         if (profissao != null && profissao.isNotEmpty) 'profissao': profissao,
         if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
+        if (ordenarPor != null) 'ordenar_por': ordenarPor,
       },
     );
 

@@ -25,6 +25,25 @@ import 'perfil_profissional_screen.dart';
 /// meio do Oceano Atlântico, em 0,0, antes do GPS responder).
 const _centroManaus = LatLng(-3.130130, -60.023400);
 
+/// Raios de busca oferecidos no filtro de proximidade -- em km, sempre
+/// nessa ordem (menor pro maior). Lista fechada de propósito (o pedido foi
+/// especificamente "1km, 2km, 3km, 4km ou 5km", não um slider contínuo).
+const _raiosDisponiveisKm = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+/// As três formas de ordenar o resultado da busca -- espelha
+/// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
+/// não mandar o parâmetro, que já é o padrão "distancia" no backend).
+enum _OrdenacaoBusca {
+  distancia('Mais próximos', null),
+  melhorCustoBeneficio('Melhor custo-benefício', 'melhor_custo_beneficio'),
+  melhoresAvaliados('Melhores avaliados', 'melhores_avaliados');
+
+  final String rotulo;
+  final String? valorApi;
+
+  const _OrdenacaoBusca(this.rotulo, this.valorApi);
+}
+
 class MapaScreen extends StatefulWidget {
   const MapaScreen({super.key});
 
@@ -39,6 +58,13 @@ class _MapaScreenState extends State<MapaScreen> {
   // uma única vez (não a cada busca no mapa, não a cada tecla digitada).
   List<Categoria> _categorias = [];
   Subcategoria? _subcategoriaSelecionada;
+
+  // Filtros avançados -- raio de proximidade e ordenação. Reativos, no
+  // mesmo espírito de `_subcategoriaSelecionada` acima: mudar qualquer um
+  // dos dois já rebusca automaticamente (ver `_aoMudarRaio`/`_aoMudarOrdenacao`),
+  // sem precisar de um botão "aplicar" separado.
+  double _raioKmSelecionado = 5;
+  _OrdenacaoBusca _ordenacaoSelecionada = _OrdenacaoBusca.distancia;
 
   @override
   void initState() {
@@ -83,8 +109,9 @@ class _MapaScreenState extends State<MapaScreen> {
     await context.read<ProfissionaisProvider>().buscarProximos(
           latitude: latitude,
           longitude: longitude,
-          raioKm: 10,
+          raioKm: _raioKmSelecionado,
           subcategoriaId: _subcategoriaSelecionada?.id,
+          ordenarPor: _ordenacaoSelecionada.valorApi,
         );
   }
 
@@ -93,6 +120,27 @@ class _MapaScreenState extends State<MapaScreen> {
   /// filtro, sem precisar de um botão "aplicar" separado.
   void _aoMudarSubcategoria(Subcategoria? subcategoria) {
     setState(() => _subcategoriaSelecionada = subcategoria);
+    final posicao = context.read<LocalizacaoProvider>().posicao;
+    if (posicao != null) {
+      _buscar(posicao.latitude, posicao.longitude);
+    }
+  }
+
+  /// Mesmo espírito de `_aoMudarSubcategoria` acima -- trocar o raio ou a
+  /// ordenação já rebusca na hora, reativo, sem botão "aplicar" separado
+  /// (requisito 3 do filtro avançado).
+  void _aoMudarRaio(double raioKm) {
+    if (raioKm == _raioKmSelecionado) return;
+    setState(() => _raioKmSelecionado = raioKm);
+    final posicao = context.read<LocalizacaoProvider>().posicao;
+    if (posicao != null) {
+      _buscar(posicao.latitude, posicao.longitude);
+    }
+  }
+
+  void _aoMudarOrdenacao(_OrdenacaoBusca ordenacao) {
+    if (ordenacao == _ordenacaoSelecionada) return;
+    setState(() => _ordenacaoSelecionada = ordenacao);
     final posicao = context.read<LocalizacaoProvider>().posicao;
     if (posicao != null) {
       _buscar(posicao.latitude, posicao.longitude);
@@ -173,7 +221,7 @@ class _MapaScreenState extends State<MapaScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -193,6 +241,48 @@ class _MapaScreenState extends State<MapaScreen> {
               ],
             ),
           ),
+
+          // Filtros avançados: raio de proximidade + ordenação. Chips logo
+          // abaixo da barra de busca principal (requisito 3), sempre
+          // visíveis -- diferente da especialidade (que só filtra quando a
+          // pessoa escolhe uma), aqui SEMPRE existe um raio e uma ordenação
+          // selecionados (com valores padrão: 5km, "Mais próximos").
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Icon(Icons.social_distance, size: 18, color: Colors.grey.shade600),
+                for (final km in _raiosDisponiveisKm)
+                  ChoiceChip(
+                    label: Text('${km.toStringAsFixed(0)} km'),
+                    selected: _raioKmSelecionado == km,
+                    onSelected: (_) => _aoMudarRaio(km),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Icon(Icons.sort, size: 18, color: Colors.grey.shade600),
+                for (final ordenacao in _OrdenacaoBusca.values)
+                  ChoiceChip(
+                    label: Text(ordenacao.rotulo),
+                    selected: _ordenacaoSelecionada == ordenacao,
+                    onSelected: (_) => _aoMudarOrdenacao(ordenacao),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
 
           if (localizacao.erro != null)
             _AvisoFaixa(mensagem: localizacao.erro!, cor: Colors.orange),

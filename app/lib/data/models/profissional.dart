@@ -17,6 +17,15 @@ class Profissional {
   final double distanciaMetros;
   final String? urlFotoPerfil;
 
+  /// Média do critério "econômico" das avaliações -- usada como
+  /// "custo-benefício" no filtro de ordenação do mapa. `null` quando o
+  /// profissional ainda não tem nenhuma avaliação (nunca `0`).
+  final double? mediaCustoBeneficio;
+
+  /// Média geral das avaliações (os três critérios juntos). Mesma regra de
+  /// `null` acima -- usada no filtro "Melhores avaliados".
+  final double? mediaGeral;
+
   const Profissional({
     required this.id,
     required this.tipoPessoa,
@@ -28,6 +37,8 @@ class Profissional {
     required this.longitude,
     required this.distanciaMetros,
     this.urlFotoPerfil,
+    this.mediaCustoBeneficio,
+    this.mediaGeral,
   });
 
   factory Profissional.fromJson(Map<String, dynamic> json) {
@@ -42,6 +53,8 @@ class Profissional {
       longitude: (json['longitude'] as num).toDouble(),
       distanciaMetros: (json['distancia_metros'] as num).toDouble(),
       urlFotoPerfil: json['url_foto_perfil'] as String?,
+      mediaCustoBeneficio: (json['media_custo_beneficio'] as num?)?.toDouble(),
+      mediaGeral: (json['media_geral'] as num?)?.toDouble(),
     );
   }
 

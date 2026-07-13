@@ -31,6 +31,15 @@ export interface FiltroProximidade {
   subcategoriaId?: number;
   limite: number;
   offset: number;
+  /**
+   * Como ordenar o resultado -- padrão `'distancia'` (mais perto primeiro,
+   * comportamento de sempre). `'melhor_custo_beneficio'` e
+   * `'melhores_avaliados'` colocam quem tem a melhor média primeiro (empates
+   * e quem ainda não tem avaliação nenhuma caem para o fim, ordenados por
+   * distância entre si -- ver `NULLS LAST` no SQL). Validado contra uma
+   * lista fechada na rota (`ORDENS_VALIDAS` abaixo) antes de chegar aqui.
+   */
+  ordenarPor?: 'distancia' | 'melhor_custo_beneficio' | 'melhores_avaliados';
 }
 
 /** O que sai daqui. Espelha o SELECT abaixo, coluna por coluna. */
@@ -46,7 +55,36 @@ export interface ProfissionalProximo {
   longitude: number;
   distancia_metros: number;
   url_foto_perfil: string | null;
+  /**
+   * Média do critério "econômico" das avaliações -- é o proxy mais próximo
+   * que o schema tem hoje para "custo-benefício" (ver comentário completo
+   * junto de `ORDENS_VALIDAS`). `null` quando o profissional ainda não tem
+   * nenhuma avaliação -- nunca `0` (0 pareceria "profissional ruim").
+   */
+  media_custo_beneficio: number | null;
+  /** Média geral (dos três critérios juntos). Mesma regra de `null` acima. */
+  media_geral: number | null;
 }
+
+/**
+ * As três opções válidas de ordenação, cada uma já com a cláusula SQL
+ * correspondente pronta. NUNCA vira `ORDER BY ${valorQueVeioDoUsuario}`
+ * direto -- $1/$2 dentro destas strings são os MESMOS placeholders já
+ * usados no resto da query (a posição de longitude/latitude), então isto
+ * continua 100% parametrizado; só a ESCOLHA de qual cláusula usar é feita
+ * em código, a partir de uma lista fechada (a rota já valida `ordenar_por`
+ * contra essa mesma lista antes de chamar `buscarProximos`).
+ */
+const ORDENS_VALIDAS = {
+  distancia: 'p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography',
+  // "Custo-benefício" não é um critério próprio no schema -- as avaliações
+  // têm três notas (técnico/comportamental/econômico, ver
+  // avaliacoes_profissional na migração 01). "econômico" (preço justo pelo
+  // serviço) é o mais próximo em significado de "custo-benefício" pedido
+  // pelo usuário, por isso é o que alimenta esta ordenação.
+  melhor_custo_beneficio: 'av.media_custo_beneficio DESC NULLS LAST, p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography',
+  melhores_avaliados: 'av.media_geral DESC NULLS LAST, p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography',
+} as const;
 
 /**
  * Busca profissionais dentro de um raio, ordenados do mais perto ao mais longe.
@@ -99,11 +137,33 @@ export async function buscarProximos(
           p.localizacao,
           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
         )::numeric
-      , 2)::float8                          AS distancia_metros
+      , 2)::float8                          AS distancia_metros,
+
+      av.media_custo_beneficio,
+      av.media_geral
 
     FROM profissionais p
     LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+
+    -- Médias de avaliação pré-agregadas por profissional, numa subquery só
+    -- (GROUP BY), e então JUNTADAS aqui -- não uma subquery/AVG por LINHA
+    -- do resultado externo. É o que evita o clássico N+1 (uma query de
+    -- média por pino do mapa): o Postgres calcula a média de TODOS os
+    -- profissionais avaliados de uma vez só, uma única passada pela tabela
+    -- de avaliações, e o LEFT JOIN casa pelo profissional_id -- o mesmo
+    -- espírito de "buscar tudo de uma vez e filtrar depois" já usado na
+    -- árvore de categorias (categorias.repository.ts).
+    LEFT JOIN (
+      SELECT
+        profissional_id,
+        ROUND(AVG(estrelas_economico)::numeric, 2)::float8 AS media_custo_beneficio,
+        ROUND(
+          AVG((estrelas_tecnico + estrelas_comportamental + estrelas_economico) / 3.0)::numeric
+        , 2)::float8                                        AS media_geral
+      FROM avaliacoes_profissional
+      GROUP BY profissional_id
+    ) av ON av.profissional_id = p.profissional_id
 
     WHERE
       -- ST_DWithin é o predicado que o índice GIST consegue usar.
@@ -143,7 +203,7 @@ export async function buscarProximos(
       -- é o lugar certo para essa correção, não aqui na busca.
       AND ($7::int IS NULL OR p.subcategoria_id = $7::int)
 
-    ORDER BY p.localizacao <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+    ORDER BY ${ORDENS_VALIDAS[filtro.ordenarPor ?? 'distancia']}
     LIMIT $5
     OFFSET $6;
   `;
