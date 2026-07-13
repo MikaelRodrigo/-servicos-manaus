@@ -431,3 +431,32 @@ Como `cropper.js` não roda em Flutter, e a tela de cadastro (`cadastro_screen.d
 1. **Rodar `flutter pub get` numa máquina com Flutter/rede** (ex.: via Android Studio, como já foi feito com sucesso nesta sessão para outra tarefa) para confirmar que `image_cropper ^8.1.0` resolve e compila sem conflito com as outras dependências — não verificável neste sandbox.
 2. Testar o fluxo completo na prática: escolher foto → tela de recorte abre corretamente → confirmar → preview batendo com o que foi salvo, em ambas as telas (profissional e cliente), Android e (se possível) iOS.
 3. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`).
+
+---
+
+## Sessão de 13/07/2026 (continuação — contagem de profissionais por subcategoria no autocomplete)
+
+### Pedido
+No dropdown de busca por especialidade do mapa (`BuscaSubcategoriaAutocomplete`), mostrar quantos profissionais ativos existem em cada subcategoria, no formato "Encanador (9)". Pedido veio com orientação explícita de performance: evitar "N+1" (contar a cada tecla digitada) e preferir uma contagem pré-calculada/indexada, cacheada localmente.
+
+### Decisão de arquitetura
+Em vez de uma tabela de contagem mantida por trigger (sugerida como opção no pedido), optei por um `COUNT`+`GROUP BY` agregado direto na MESMA query que já monta a árvore de categorias (`GET /categorias`) — apoiado no índice parcial `idx_profissionais_subcategoria_id`, que já existe desde a migração 09. Motivo: essa árvore já é buscada **uma única vez por tela** (`_carregarCategorias` no `initState` de `mapa_screen.dart`) e cacheada em memória no Flutter — a busca em si (`_buscar` no autocomplete) já filtra 100% em memória, sem nenhuma chamada de rede por tecla. Ou seja, o requisito de "não contar a cada tecla" já estava satisfeito pela arquitetura existente; bastava a contagem vir embutida nessa única busca, sem precisar de tabela/trigger extra (que adicionaria complexidade real: decrementar/incrementar em toda troca de subcategoria de um profissional, sem nenhum ganho de performance perceptível na escala atual do projeto).
+
+**Observação também comunicada:** o schema não tem nenhum conceito de profissional "ativo"/"inativo" hoje (sem coluna de status, sem soft-delete) — a contagem é de todos os profissionais cadastrados naquela subcategoria. Se um conceito de ativo/inativo for necessário no futuro, é uma migração nova separada.
+
+### O que foi feito
+- **`backend/src/repositories/categorias.repository.ts`**: a query de `listarCategoriasComSubcategorias` ganhou um segundo `LEFT JOIN` (contra `profissionais`) + `COUNT(p.subcategoria_id)` + `GROUP BY`. Interface `Subcategoria` ganhou `totalProfissionais: number` (convertido de string, já que `COUNT` do Postgres volta como `bigint`/string via `node-postgres`).
+- **`app/lib/data/models/categoria.dart`**: `Subcategoria` ganhou `totalProfissionais` (default `0`, para não quebrar nenhum outro ponto que já construía o objeto).
+- **`app/lib/widgets/busca_subcategoria_autocomplete.dart`**: `title` de cada linha do dropdown virou um `Row` com o nome da subcategoria + `'(${total})'` num `Text` com `textTheme.bodySmall` + cinza (`Colors.grey.shade600`) — mesmo padrão visual já usado em outros textos informativos secundários do app (ex.: "Localização atual: ..." em `editar_perfil_screen.dart`), pra manter o nome como foco visual principal e o número como detalhe.
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros.
+- Balanceamento de chaves/parênteses/colchetes (script Python) nos 2 arquivos Dart tocados — OK.
+- **Corrupção de mount de novo** (mesmo bug recorrente): os 3 arquivos (`categorias.repository.ts`, `categoria.dart`, `busca_subcategoria_autocomplete.dart`) vieram truncados no mount depois das edições — reescritos por inteiro via heredoc a partir do conteúdo autoritativo, reconferidos (`wc -l`/`file` batendo com o esperado) antes de compilar/commitar.
+- `git diff --stat` conferido antes do commit — só os 3 arquivos esperados, tamanho de diff batendo com a mudança pretendida.
+- Commit `d9f56a9` (3 arquivos, 63 inserções/6 remoções).
+- **Não foi possível testar contra o banco real** (sandbox sem acesso de rede à Neon) — a lógica do `COUNT`+`GROUP BY` foi revisada manualmente, mas o valor exibido em produção só pode ser confirmado depois que as migrações pendentes (`07`-`10`) rodarem no Neon.
+
+### Pendências para a próxima sessão
+1. Testar de verdade no Flutter: digitar no campo de busca do mapa e conferir que cada sugestão mostra "(N)" corretamente, com N batendo com a quantidade real de profissionais daquela subcategoria no banco.
+2. Itens antigos ainda pendentes: rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`); testar fluxo de recorte de foto de perfil numa máquina com Flutter/rede.
