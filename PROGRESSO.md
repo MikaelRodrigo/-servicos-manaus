@@ -374,3 +374,30 @@ Nesta mesma sessão (via Android Studio, ver seção abaixo), o emulador Pixel 7
 2. Rodar as migrações `07` a `09` no Neon (segue sem confirmação de que foi feito).
 3. Investigar por que "Windows (desktop)" não builda (`Unable to find suitable Visual Studio toolchain`) — instalar o workload "Desktop development with C++" do Visual Studio Build Tools, se um dia for necessário rodar como app desktop nativo.
 4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real.
+
+---
+
+## Sessão de 13/07/2026 (continuação — backfill de categoria/subcategoria em vez de fallback na query)
+
+### Pedido
+Usuário considerou o fix anterior (fallback textual dentro de `buscarProximos`) uma solução inferior: "A melhor solução não seria essa, preciso que vc dê uma classe e categoria para os profissionais que estavam sem." — ou seja, corrigir o DADO na raiz (todo profissional com `categoria_id`/`subcategoria_id` de verdade), não compensar na leitura a cada busca.
+
+### O que foi feito
+- **Revertido** o fallback textual em `buscarProximos` (commit `2f18c4c`) de volta ao match exato simples por `subcategoria_id` — a query volta a ser só `AND ($7::int IS NULL OR p.subcategoria_id = $7::int)`, sem comparar contra texto livre antigo.
+- **Nova migração `database/10_backfill_categoria_subcategoria.sql`**, em duas passadas:
+  1. **Backfill inteligente por nome**: para profissionais com `subcategoria_id IS NULL` e algum texto livre antigo (`profissao`/`categoria_atuacao`), procura a subcategoria cujo NOME aparece dentro desse texto (`unaccent`/`lower`/`LIKE`, igual ao filtro textual legado). Usa `LATERAL` + `ORDER BY length(nome) DESC LIMIT 1` para pegar o match mais específico em caso de ambiguidade (ex.: "Eletricista Residencial" bate com a subcategoria "Eletricista").
+  2. **Rede de segurança "Outros"**: nova categoria + subcategoria "Outros" (criadas na própria migração), atribuída a quem sobrou depois do passo 1 — texto vazio ou profissão que não bate com nenhuma subcategoria conhecida. Depois desta migração, NENHUM profissional fica com `categoria_id`/`subcategoria_id` NULL. Quem caiu em "Outros" pode editar o próprio perfil depois (`PATCH /profissionais/me`) para escolher a especialidade certa.
+  3. Bloco de verificação (`DO $$ ... RAISE NOTICE`) no final, no mesmo padrão da migração 09, reportando quantos profissionais existem, quantos ainda ficaram sem categoria (esperado: 0) e quantos caíram em "Outros".
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros (depois de reverter o fallback).
+- `git diff` conferido — a mudança em `profissionais.repository.ts` é exatamente o revert esperado (23 remoções líquidas na cláusula do WHERE).
+- **Sincronização mount vs. Windows conferida de novo:** `profissionais.repository.ts` veio com bytes nulos sobrando no fim do arquivo depois da edição (mesmo padrão de sessões anteriores) — reescrito por inteiro via heredoc a partir do conteúdo autoritativo, reconferido (`tail -c | cat -A` limpo) antes de compilar/commitar. A migração nova (arquivo novo) veio íntegra de primeira.
+- Commit `c66a712`.
+- **Não foi possível rodar a migração contra o banco real nem testar o backfill de verdade** (sandbox sem acesso de rede à Neon) — a lógica do `LIKE`/`LATERAL` foi revisada manualmente linha a linha, mas o comportamento real (quantos profissionais caem em "Outros", se o match por nome funciona como esperado com os dados reais) só pode ser confirmado rodando no Neon.
+
+### Pendências para a próxima sessão
+1. **Rodar a migração `10_backfill_categoria_subcategoria.sql` no Neon** (junto com `07`/`08`/`09`, que também seguem pendentes) — sem isso, o filtro por especialidade continua quebrado para profissionais antigos.
+2. Depois de rodar, conferir a saída do `RAISE NOTICE` (quantos profissionais caíram em "Outros") e, se for um número alto, considerar revisar manualmente esses casos (talvez o texto livre tivesse profissões válidas que simplesmente não bateram com o `LIKE`).
+3. Testar de verdade: filtrar por uma especialidade no mapa e confirmar que profissionais antigos (cadastrados antes da migração 09) voltam a aparecer.
+4. Itens antigos ainda pendentes: migrações `07`-`09` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)" (`Visual Studio toolchain`).
