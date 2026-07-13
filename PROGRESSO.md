@@ -308,3 +308,34 @@ No meio desta etapa, um `git log` revelou um commit novo (`54f1c0c`, autor "Alex
 2. Migrações `07` a `09` seguem pendentes de rodar no Neon (bloqueiam tudo que depende de categoria/subcategoria/CEP em produção).
 3. Rodar `flutter pub get && flutter analyze` de verdade num ambiente com SDK Flutter, já que este sandbox não tem o toolchain — a verificação desta sessão ficou só em nível estático/manual do lado Flutter.
 4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+
+---
+
+## Sessão de 13/07/2026 (continuação — redesign visual global do app)
+
+### Pedido
+Aplicar um redesign na interface para deixá-la mais moderna, clean e sofisticada, seguindo 6 diretrizes: bordas arredondadas (≥12-16px) em cards/botões/campos; sombras suaves em vez de bordas pesadas; mais respiro (padding/margin); paleta neutra + uma cor de destaque, tipografia sem serifa com bom espaçamento entre linhas; hover/transições leves (0.3s) em botões e cards; remoção de poluição visual (bordas/divisórias marcadas, cores fortes em excesso). Pedido para aplicar "globalmente".
+
+### O que foi feito
+Como é um app Flutter (não CSS web), "global" foi resolvido com um `ThemeData` central que cascateia para todas as telas, combinado com a remoção de overrides locais que bloqueavam esse tema.
+
+- **Novo `app/lib/core/theme/app_theme.dart`** — `AppRadius` (10/14/16/20px) e `AppColors` (paleta neutra: cinza claro `#F6F7F9`, branco, texto `#1F2937`/`#667085`, destaque teal `#12A594`) como tokens centrais. Função `construirTemaClaro()` monta um `ThemeData` (Material 3) cobrindo: `cardTheme` (raio 16px, sombra suave via `shadowColor`+elevação baixa, `surfaceTintColor: transparent` pra não deixar o Material 3 tingir os cards de roxo), `inputDecorationTheme` (campo preenchido cinza claro, raio 14px, sem borda visível), botões (`Elevated`/`Filled`/`Outlined`/`Text`, todos com raio 14px, padding maior, `animationDuration` de 220ms e elevação/overlay reativos a hover via `WidgetStateProperty`), `chipTheme`, `dividerTheme` (mais fino e discreto), `navigationBarTheme`, `snackBarTheme`, `bottomSheetTheme`, `dialogTheme`, `listTileTheme` e um `TextTheme` customizado com mais espaçamento entre linhas (height 1.3–1.5).
+- **`main.dart`** — troca o `ThemeData` mínimo inline por `construirTemaClaro()`.
+- **Limpeza de overrides locais** que travavam o novo tema: removidos `border: OutlineInputBorder()` hardcoded (cantos retos) de todos os campos de texto em `login_screen.dart`, `cadastro_screen.dart`, `editar_perfil_screen.dart`, `perfil_cliente_screen.dart`, `perfil_profissional_screen.dart`, `avaliacao_screen.dart`, `busca_subcategoria_autocomplete.dart` e `seletor_categoria_cascata.dart` — agora todos herdam o campo preenchido/arredondado do tema.
+- **Ajustes pontuais de respiro e cor:** padding maior em `login_screen.dart`/`cadastro_screen.dart` (24→28), `mapa_screen.dart` (12→16) e `servicos_screen.dart` (12→16, espaçamento entre itens 8→12); cartão verde forte de "já avaliado" (`servico_detalhe_screen.dart`) suavizado para um verde-água claro com ícone outline; botão de adicionar foto em `avaliacao_screen.dart` trocado de borda tracejada cinza para container preenchido arredondado; dropdown de busca (`busca_subcategoria_autocomplete.dart`) ganhou sombra mais elevada e raio maior (8→14px).
+
+### Verificação feita
+- Balanceamento de chaves/parênteses/colchetes (script Python, raw count + stripped) em todos os 13 arquivos tocados — OK.
+- Revisão manual linha a linha de cada diff (sem SDK Flutter neste sandbox, então sem `flutter analyze`/`flutter run`).
+- `git fsck --full` e `git show --stat HEAD` depois do commit, confirmando árvore íntegra e sem corrupção.
+- Commit único `f362313` (13 arquivos, 322 inserções/45 remoções).
+
+### Dois bugs novos de sandbox descobertos e documentados (para não perder tempo de novo)
+1. **"Git racy"/leitura inconsistente:** `git status`/`git diff` deixaram de detectar mudanças reais em 2 arquivos (`mapa_screen.dart`, `servicos_screen.dart`) mesmo com `git hash-object` provando que o conteúdo no worktree era diferente do commitado. Diagnóstico: `git update-index --refresh` (acusa "needs update"). Correção segura: `rm -f .git/index && git reset` (reconstrói o índice a partir do HEAD, SEM tocar no worktree — nunca usar `git reset --hard`, que descartaria as mudanças não commitadas).
+2. **Criação de diretório do object database falha silenciosamente:** `git hash-object -w`/`git add` num arquivo novo (`app_theme.dart`) falharam repetidamente com `unable to create temporary file: No such file or directory`. Causa: o subdiretório de dois dígitos hex do SHA1 (`.git/objects/a7/`) não ficava confiavelmente visível no mount deste sandbox mesmo depois de "criado com sucesso" — bug de consistência do bind-mount, não do Git. **Contorno:** loop de retry chamando `git hash-object -w`, adicionando uma quebra de linha no fim do arquivo a cada falha (muda o SHA1/prefixo) até cair num prefixo de diretório que já existia — funcionou na 2ª tentativa. Sempre confirmar o blob resultante com `git cat-file -t`/`-p` antes de seguir.
+
+### Pendências para a próxima sessão
+1. Testar de verdade no Flutter (`flutter run`): conferir visualmente cards arredondados, sombras, campos preenchidos sem borda, hover em botões (web/desktop) e espaçamento geral em todas as telas principais (login, cadastro, mapa, meus serviços, perfis).
+2. Considerar adicionar a fonte Inter/Poppins via pacote `google_fonts` **num ambiente com acesso de rede/toolchain completo** — não foi feito aqui de propósito, pois este sandbox não consegue verificar se o pacote resolve/compila (ficou só com a Roboto padrão do Flutter + `TextTheme` customizado).
+3. Migrações `07` a `09` seguem pendentes de rodar no Neon (itens antigos, não relacionados ao redesign).
+4. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
