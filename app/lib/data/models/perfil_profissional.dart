@@ -11,6 +11,10 @@ class PerfilProfissional {
   final String tipoPessoa; // 'PF' ou 'PJ'
   final String nomeExibicao;
   final String? atuacao;
+  // Nome da CATEGORIA-mãe da subcategoria em `atuacao` (migração 09) -- ex.:
+  // atuacao = "Eletricista", categoria = "Manutenção e Reforma". Usado na
+  // edição de perfil para mostrar "categoria atual" antes de trocar.
+  final String? categoria;
   final String? descricao;
   final String? urlFotoPerfil;
   final double? latitude;
@@ -22,6 +26,7 @@ class PerfilProfissional {
     required this.tipoPessoa,
     required this.nomeExibicao,
     required this.atuacao,
+    required this.categoria,
     required this.descricao,
     required this.urlFotoPerfil,
     required this.latitude,
@@ -35,6 +40,7 @@ class PerfilProfissional {
       tipoPessoa: json['tipo_pessoa'] as String,
       nomeExibicao: json['nome_exibicao'] as String,
       atuacao: json['atuacao'] as String?,
+      categoria: json['categoria'] as String?,
       descricao: json['descricao'] as String?,
       urlFotoPerfil: json['url_foto_perfil'] as String?,
       latitude: (json['latitude'] as num?)?.toDouble(),

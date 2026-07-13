@@ -112,9 +112,16 @@ class ProfissionaisService {
   ///
   /// `foto` é `XFile?` (image_picker), igual ao padrão já usado em
   /// `AvaliacoesService.avaliarProfissional` -- funciona em mobile e web.
+  ///
+  /// `categoriaId`/`subcategoriaId` só existem JUNTOS -- vêm do
+  /// `SeletorCategoriaCascata` reaberto na tela de edição. A tela chamando
+  /// isto é responsável por só passar os dois ou nenhum (o backend recusa
+  /// um par incompleto -- ver PATCH /profissionais/me).
   Future<PerfilProfissional> atualizarMeuPerfil({
     String? descricao,
     String? cep,
+    int? categoriaId,
+    int? subcategoriaId,
     XFile? foto,
   }) async {
     final resposta = await _api.patchMultipart(
@@ -122,6 +129,8 @@ class ProfissionaisService {
       campos: {
         if (descricao != null) 'descricao': descricao,
         if (cep != null) 'cep': cep,
+        if (categoriaId != null) 'categoria_id': categoriaId.toString(),
+        if (subcategoriaId != null) 'subcategoria_id': subcategoriaId.toString(),
       },
       bytesArquivo: foto != null ? await foto.readAsBytes() : null,
       nomeArquivo: foto?.name,

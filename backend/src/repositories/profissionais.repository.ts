@@ -219,6 +219,15 @@ export interface AtualizacaoPerfilProfissional {
   latitude?: number;
   longitude?: number;
   enderecoAtuacao?: string;
+  /**
+   * Igual ao trio cep/latitude/longitude: só existem JUNTOS (ou os dois
+   * `undefined`, ou os dois preenchidos) -- a rota valida isso antes de
+   * chamar esta função. Nunca um só, porque a FK composta do banco
+   * (`fk_profissionais_subcategoria_categoria`, migração 09) recusaria um
+   * par incoerente -- ver categoria_id/subcategoria_id em profissionais.
+   */
+  categoriaId?: number;
+  subcategoriaId?: number;
 }
 
 /**
@@ -244,7 +253,9 @@ export async function atualizarPerfilProfissional(
               cep              = COALESCE($4, cep),
               latitude         = COALESCE($5, latitude),
               longitude        = COALESCE($6, longitude),
-              endereco_atuacao = COALESCE($7, endereco_atuacao)
+              endereco_atuacao = COALESCE($7, endereco_atuacao),
+              categoria_id     = COALESCE($8, categoria_id),
+              subcategoria_id  = COALESCE($9, subcategoria_id)
         WHERE profissional_id = $1
         RETURNING *
      )
@@ -270,6 +281,8 @@ export async function atualizarPerfilProfissional(
       dados.latitude ?? null,
       dados.longitude ?? null,
       dados.enderecoAtuacao ?? null,
+      dados.categoriaId ?? null,
+      dados.subcategoriaId ?? null,
     ],
   );
   return rows[0];

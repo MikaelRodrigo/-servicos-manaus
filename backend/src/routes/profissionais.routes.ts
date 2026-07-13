@@ -16,6 +16,7 @@ import { buscarPortifolio, buscarResumoDeAvaliacoes } from '../repositories/aval
 import { exigirAutenticacao, exigirPapel, autenticacaoOpcional } from '../middlewares/autenticacao';
 import { uploadFotoPerfil, urlPublicaDoArquivoPerfil } from '../middlewares/upload';
 import { buscarLocalizacaoPorCep } from '../services/cep';
+import { ehErroDePostgres, PG_FOREIGN_KEY_VIOLATION } from '../utils/erros-postgres';
 
 export const profissionaisRouter = Router();
 
@@ -138,12 +139,16 @@ profissionaisRouter.get(
 
    Content-Type: multipart/form-data
    Campos (todos opcionais, mas ao menos um precisa vir):
-     descricao   (texto, até 2000 caracteres)
-     cep         (texto, 8 dígitos) -- geocodificado nesta rota: define
-                 latitude/longitude (o que alimenta a busca por proximidade
-                 do mapa) e substitui endereco_atuacao pelo endereço
-                 formatado que a geocodificação devolveu.
-     foto_perfil (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
+     descricao      (texto, até 2000 caracteres)
+     cep            (texto, 8 dígitos) -- geocodificado nesta rota: define
+                    latitude/longitude (o que alimenta a busca por
+                    proximidade do mapa) e substitui endereco_atuacao pelo
+                    endereço formatado que a geocodificação devolveu.
+     categoria_id    (inteiro) -- só junto com subcategoria_id, os dois ou
+     subcategoria_id (inteiro)    nenhum. A FK composta da migração 09
+                    (fk_profissionais_subcategoria_categoria) recusa um par
+                    incoerente -- ver SeletorCategoriaCascata no app.
+     foto_perfil    (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
 
    É rota PATCH, não POST: estamos atualizando um recurso que já existe (o
    cadastro do profissional), não criando um novo.
@@ -166,9 +171,27 @@ profissionaisRouter.patch(
           ? apenasDigitos(req.body.cep, 'cep', 8)
           : undefined;
 
-      if (descricao === undefined && cepBruto === undefined && urlFotoPerfil === undefined) {
+      // `categoria_id`/`subcategoria_id` só existem JUNTOS -- mesmo espírito
+      // do trio cep/latitude/longitude abaixo. A coerência do PAR (a
+      // subcategoria de fato pertencer à categoria) fica por conta da FK
+      // composta do banco; aqui só garantimos que os dois vieram ou nenhum
+      // veio, antes de chamar o repository.
+      const categoriaId = inteiroPositivoOpcional(req.body.categoria_id, 'categoria_id');
+      const subcategoriaId = inteiroPositivoOpcional(req.body.subcategoria_id, 'subcategoria_id');
+      if ((categoriaId === undefined) !== (subcategoriaId === undefined)) {
         throw new ErroDeValidacao(
-          'Envie ao menos "descricao", "cep" ou uma foto ("foto_perfil") para atualizar.',
+          'Envie "categoria_id" e "subcategoria_id" juntos, para trocar a categoria.',
+        );
+      }
+
+      if (
+        descricao === undefined &&
+        cepBruto === undefined &&
+        urlFotoPerfil === undefined &&
+        categoriaId === undefined
+      ) {
+        throw new ErroDeValidacao(
+          'Envie ao menos "descricao", "cep", "categoria_id"/"subcategoria_id" ou uma foto ("foto_perfil") para atualizar.',
         );
       }
 
@@ -189,10 +212,21 @@ profissionaisRouter.patch(
         latitude: localizacao?.latitude,
         longitude: localizacao?.longitude,
         enderecoAtuacao: localizacao?.enderecoFormatado,
+        categoriaId,
+        subcategoriaId,
       });
 
       return res.json(perfilAtualizado);
     } catch (erro) {
+      // `subcategoria_id` não existe, ou existe mas não pertence à
+      // `categoria_id` informada -- a FK composta (migração 09) recusa o
+      // UPDATE nos dois casos. Mesma tradução usada no cadastro
+      // (auth.routes.ts).
+      if (ehErroDePostgres(erro) && erro.code === PG_FOREIGN_KEY_VIOLATION) {
+        return next(
+          new ErroDeValidacao('Categoria/subcategoria inválida. Selecione novamente na lista.'),
+        );
+      }
       return next(erro);
     }
   },

@@ -4,10 +4,13 @@ import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
+import '../data/models/categoria.dart';
 import '../data/models/perfil_profissional.dart';
 import '../data/services/api_client.dart';
+import '../data/services/categorias_service.dart';
 import '../data/services/profissionais_service.dart';
 import '../providers/auth_provider.dart';
+import '../widgets/seletor_categoria_cascata.dart';
 
 /// Tela em que o PRÓPRIO profissional edita seu perfil público: foto,
 /// descrição ("sobre mim") e CEP. É o que alimenta os campos que antes
@@ -38,6 +41,17 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   String? _enderecoAtualExibicao;
   bool _salvando = false;
 
+  // Categoria/subcategoria -- mesmo espírito do CEP acima: o seletor começa
+  // sempre VAZIO (nunca pré-selecionado com a categoria atual), e o valor
+  // atual só aparece como texto informativo ao lado. Só troca de verdade
+  // quando a pessoa escolhe os dois níveis de novo -- ver `_salvar`.
+  List<Categoria> _categorias = [];
+  bool _carregandoCategorias = true;
+  Categoria? _categoriaSelecionada;
+  Subcategoria? _subcategoriaSelecionada;
+  String? _erroCategoria;
+  String? _categoriaAtualExibicao;
+
   @override
   void initState() {
     super.initState();
@@ -49,8 +63,29 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
         _descricaoController.text = perfil.descricao ?? '';
         _urlFotoAtual = perfil.urlFotoPerfil;
         _enderecoAtualExibicao = perfil.enderecoAtuacao;
+        _categoriaAtualExibicao = perfil.atuacao != null
+            ? (perfil.categoria != null ? '${perfil.atuacao} (em: ${perfil.categoria})' : perfil.atuacao)
+            : null;
       });
     });
+    _carregarCategorias();
+  }
+
+  Future<void> _carregarCategorias() async {
+    try {
+      final categorias = await CategoriasService.instancia.listarCategorias();
+      if (!mounted) return;
+      setState(() {
+        _categorias = categorias;
+        _carregandoCategorias = false;
+      });
+    } on ApiException catch (erro) {
+      if (!mounted) return;
+      setState(() => _carregandoCategorias = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível carregar as categorias: ${erro.mensagem}')),
+      );
+    }
   }
 
   @override
@@ -98,11 +133,15 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   Future<void> _salvar() async {
     final descricao = _descricaoController.text.trim();
     final cep = _cepController.text.trim();
+    final categoria = _categoriaSelecionada;
+    final subcategoria = _subcategoriaSelecionada;
 
-    if (descricao.isEmpty && cep.isEmpty && _fotoEscolhida == null) {
+    if (descricao.isEmpty && cep.isEmpty && _fotoEscolhida == null && categoria == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Altere a descrição, informe um CEP ou escolha uma foto antes de salvar.'),
+          content: Text(
+            'Altere a descrição, informe um CEP, escolha uma foto ou uma categoria antes de salvar.',
+          ),
         ),
       );
       return;
@@ -117,17 +156,38 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
       return;
     }
 
+    // Categoria/subcategoria só existem JUNTAS -- o seletor já força isso na
+    // UI (não dá pra "salvar" categoria sem escolher a especialidade), mas
+    // confere de novo aqui, mesmo espírito da validação de CEP acima.
+    if (categoria != null && subcategoria == null) {
+      setState(() => _erroCategoria = 'Escolha também a especialidade.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escolha também a especialidade dentro da categoria.')),
+      );
+      return;
+    }
+
     setState(() => _salvando = true);
     try {
       final perfilAtualizado = await ProfissionaisService.instancia.atualizarMeuPerfil(
         descricao: descricao.isNotEmpty ? descricao : null,
         cep: cep.isNotEmpty ? cep : null,
+        categoriaId: categoria?.id,
+        subcategoriaId: subcategoria?.id,
         foto: _fotoEscolhida,
       );
       if (!mounted) return;
       setState(() {
         _enderecoAtualExibicao = perfilAtualizado.enderecoAtuacao;
         _cepController.clear();
+        _categoriaAtualExibicao = perfilAtualizado.atuacao != null
+            ? (perfilAtualizado.categoria != null
+                ? '${perfilAtualizado.atuacao} (em: ${perfilAtualizado.categoria})'
+                : perfilAtualizado.atuacao)
+            : null;
+        _categoriaSelecionada = null;
+        _subcategoriaSelecionada = null;
+        _erroCategoria = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -236,6 +296,48 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
                     Expanded(
                       child: Text(
                         'Localização atual: $_enderecoAtualExibicao',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 20),
+
+              // Categoria/subcategoria -- mesmo espírito do CEP acima: o
+              // seletor abaixo começa sempre VAZIO; a categoria/especialidade
+              // atual aparece só como texto informativo. Só troca de verdade
+              // escolhendo os dois níveis de novo (ver `_salvar`).
+              _carregandoCategorias
+                  ? const Center(child: CircularProgressIndicator())
+                  : SeletorCategoriaCascata(
+                      categorias: _categorias,
+                      categoriaSelecionada: _categoriaSelecionada,
+                      subcategoriaSelecionada: _subcategoriaSelecionada,
+                      errorText: _erroCategoria,
+                      onCategoriaAlterada: (categoria) {
+                        setState(() {
+                          _categoriaSelecionada = categoria;
+                          _erroCategoria = null;
+                        });
+                      },
+                      onSubcategoriaAlterada: (subcategoria) {
+                        setState(() {
+                          _subcategoriaSelecionada = subcategoria;
+                          _erroCategoria = null;
+                        });
+                      },
+                    ),
+              if (_categoriaAtualExibicao != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.category_outlined, size: 16, color: Colors.grey.shade600),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Categoria atual: $_categoriaAtualExibicao',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                       ),
                     ),
