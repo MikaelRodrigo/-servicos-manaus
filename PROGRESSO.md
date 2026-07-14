@@ -639,3 +639,32 @@ Ajustar o círculo de raio adicionado na sessão anterior: (1) os chips de dist�
 ### Pendências para a próxima sessão
 1. **Testar de verdade** no Flutter: tocar duas vezes no mesmo chip de raio e confirmar que o círculo desaparece suavemente (sem "pular") e o chip desmarca; conferir visualmente a nova paleta pastel.
 2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
+
+---
+
+## Sessão de 13/07/2026 (continuação — 'Mais próximos' aplicava raio curto implícito)
+
+### Pedido
+Usuário relatou que a aba "Mais próximos" aplicava um filtro de distância restritivo (raio curto) automaticamente, escondendo profissionais além de 8km mesmo antes de escolher um raio específico. Pediu que: (1) "Mais próximos" funcione só como seletor de modo, exibindo a linha de chips de distância sem aplicar filtro imediato; (2) sem raio escolhido, o mapa mostre todos os profissionais da categoria, sem restrição; (3) o filtro de geolocalização só se aplique com um clique explícito num chip de distância; (4) trocar para "Melhor custo-benefício" limpe o filtro de distância automaticamente.
+
+### Diagnóstico
+A causa raiz não estava em nenhum "useEffect" disparado no clique do botão (o app é Flutter, não React, mas a pergunta do usuário fazia sentido traduzida): o bug estava em como `_raioSelecionado == null` era tratado na hora de montar a request. O código (da sessão anterior) omitia o parâmetro `raio_km` quando nenhum raio estava "ativo" -- o que parecia ser a forma certa de dizer "sem restrição". Só que o backend tem um padrão PRÓPRIO pra esse parâmetro quando ele não vem (`numeroOpcional(req.query.raio_km, 'raio_km', 5)` em `profissionais.routes.ts`): 5km. Ou seja, "nenhum raio selecionado" sempre virava, na prática, uma busca restrita a 5km -- uma cerca curta e completamente invisível na UI (nenhum chip marcado, nenhum círculo desenhado no mapa). Esse é exatamente o sintoma relatado.
+
+Uma segunda fonte do mesmo tipo de bug foi encontrada ao revisar o código: `_raioSelecionado` nunca era limpo ao trocar de modo de ordenação (comportamento intencional de uma sessão anterior, para "preservar o filtro de forma intuitiva") -- então um raio escolhido em "Mais próximos" continuava filtrando a busca em segundo plano mesmo depois de trocar pra "Melhor custo-benefício"/"Melhores avaliados", sem nenhum chip indicando isso.
+
+### O que foi feito
+`app/lib/screens/mapa_screen.dart`:
+- `_buscar`: em vez de `raioKm: _raioSelecionado?.km` (que virava `null` e fazia o serviço omitir o parâmetro), agora é `raioKm: _raioSelecionado?.km ?? _OpcaoRaio.maisDe15km.km` -- quando nenhum raio está ativo, manda explicitamente o TETO que o backend já aceita (50km, o mesmo valor do chip "Mais que 15km") em vez de deixar a omissão cair no padrão do backend (5km). Como o backend não tem um "sem limite" de verdade (todo `raio_km` é validado entre 0.1 e `RAIO_MAXIMO_KM`), mandar o teto é a forma honesta de pedir "sem restrição visível" dentro do que a API permite -- na prática mostra todo mundo da categoria.
+- `_aoMudarOrdenacao`: agora limpa `_raioSelecionado = null` sempre que o modo de ordenação muda (nos dois sentidos -- sair de "Mais próximos" ou voltar pra ele). Reverte o comportamento "preserva o raio ao trocar de modo" de uma sessão anterior, substituindo por exatamente o que foi pedido agora: nenhum raio "esquecido" em segundo plano.
+- Comentários grandes atualizados nos dois pontos (e no doc comment do enum `_OrdenacaoBusca`) explicando a mudança de comportamento e o porquê.
+
+### Verificação feita
+- **Corrupção de mount de novo** (mesmo bug recorrente): reescrito por inteiro via heredoc a partir do conteúdo autoritativo (695 linhas), reconferido (`wc -l`/`tail`/`file`).
+- Balanceamento de chaves/parênteses/colchetes (script Python) -- OK.
+- `git diff --stat` conferido -- só `mapa_screen.dart`, 52 inserções/22 remoções.
+- Commit `09182fc`.
+- **Não foi possível rodar `flutter run` neste sandbox** -- o comportamento (abrir "Mais próximos" sem tocar em nenhum raio e ver profissionais além de 8km normalmente, trocar de modo e confirmar que o raio some) não pôde ser observado na prática.
+
+### Pendências para a próxima sessão
+1. **Testar de verdade** no Flutter: abrir "Mais próximos" sem selecionar raio nenhum e confirmar que profissionais distantes aparecem; escolher um raio, trocar para "Melhor custo-benefício" e confirmar que a lista deixa de estar restrita por aquele raio.
+2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
