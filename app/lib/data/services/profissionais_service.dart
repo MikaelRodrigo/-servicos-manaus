@@ -20,7 +20,14 @@ class ProfissionaisService {
   Future<List<Profissional>> buscarProximos({
     required double latitude,
     required double longitude,
-    double raioKm = 5,
+    /// `null` quando nenhum chip de raio está "ativo" no mapa (estado de
+    /// toggle desligado -- ver `_OpcaoRaio` em mapa_screen.dart). Nesse
+    /// caso o parâmetro `raio_km` simplesmente não é mandado na request, e
+    /// o backend já tem um padrão pra isso (5km -- ver
+    /// `numeroOpcional(req.query.raio_km, 'raio_km', 5)` em
+    /// profissionais.routes.ts): a busca continua funcionando normalmente,
+    /// só sem um raio "escolhido à mão" pelo usuário.
+    double? raioKm,
     String? profissao,
     int? subcategoriaId,
     /// Uma de `'distancia'` (padrão), `'melhor_custo_beneficio'` ou
@@ -41,7 +48,7 @@ class ProfissionaisService {
       query: {
         'latitude': latitude,
         'longitude': longitude,
-        'raio_km': raioKm,
+        if (raioKm != null) 'raio_km': raioKm,
         if (profissao != null && profissao.isNotEmpty) 'profissao': profissao,
         if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
         if (ordenarPor != null) 'ordenar_por': ordenarPor,

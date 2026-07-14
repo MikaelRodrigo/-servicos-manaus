@@ -16,7 +16,9 @@ class ProfissionaisProvider extends ChangeNotifier {
   Future<void> buscarProximos({
     required double latitude,
     required double longitude,
-    double raioKm = 5,
+    /// `null` = nenhum raio "ativo" (toggle desligado) -- ver comentário em
+    /// `ProfissionaisService.buscarProximos`.
+    double? raioKm,
     String? profissao,
     int? subcategoriaId,
     String? ordenarPor,

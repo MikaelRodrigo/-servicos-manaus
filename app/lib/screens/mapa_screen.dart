@@ -100,7 +100,26 @@ class _MapaScreenState extends State<MapaScreen> {
   // "estado do filtro mantido de forma intuitiva"). Trocar para "Melhores
   // avaliados" e voltar para "Mais próximos" preserva o raio que a pessoa
   // tinha escolhido antes, em vez de voltar pro padrão toda vez.
-  _OpcaoRaio _raioSelecionado = _OpcaoRaio.ate5km;
+  //
+  // Agora é NULLABLE de propósito: cada chip de raio funciona como um
+  // TOGGLE -- tocar num chip já ativo desliga o filtro (volta pra `null`),
+  // em vez de ficar sempre preso a uma das cinco opções. `null` = "nenhum
+  // raio escolhido à mão" -- a busca continua funcionando normalmente (o
+  // backend cai no próprio padrão dele, 5km -- ver
+  // `ProfissionaisService.buscarProximos`), só sem o círculo do raio
+  // desenhado no mapa nem nenhum chip marcado.
+  _OpcaoRaio? _raioSelecionado;
+
+  // Guarda o ÚLTIMO raio que teve um círculo desenhado, mesmo depois de
+  // `_raioSelecionado` voltar a `null` (toggle desligado). Existe só pra
+  // animação do círculo: sem isso, desligar o toggle faria o raio do
+  // `TweenAnimationBuilder` "saltar" pra 0 enquanto ele desaparece (fade +
+  // encolhimento ao mesmo tempo) -- em vez disso, o círculo desaparece do
+  // MESMO tamanho que tinha (só a opacidade anima), que é o efeito "elegante,
+  // sem pular na tela" pedido. Só é lido dentro do `AnimatedOpacity` no
+  // `build` -- nunca influencia a busca em si.
+  _OpcaoRaio? _ultimoRaioComCirculo;
+
   _OrdenacaoBusca _ordenacaoSelecionada = _OrdenacaoBusca.distancia;
 
   @override
@@ -147,7 +166,10 @@ class _MapaScreenState extends State<MapaScreen> {
     await provider.buscarProximos(
       latitude: latitude,
       longitude: longitude,
-      raioKm: _raioSelecionado.km,
+      // `null` quando o toggle de raio está desligado -- o serviço já sabe
+      // omitir `raio_km` da request nesse caso, e o backend cai no próprio
+      // padrão dele (5km).
+      raioKm: _raioSelecionado?.km,
       subcategoriaId: _subcategoriaSelecionada?.id,
       ordenarPor: _ordenacaoSelecionada.valorApi,
       limite: _limiteDeProfissionaisNoMapa,
@@ -173,7 +195,18 @@ class _MapaScreenState extends State<MapaScreen> {
     // inteiro na tela também garante caber todos eles, mesmo quando a
     // lista vem vazia (situação em que não haveria pontos de resultado
     // para basear um enquadramento).
-    _ajustarCameraParaRaio(LatLng(latitude, longitude), _raioSelecionado.km * 1000);
+    //
+    // Com o raio virando toggle (pode ser `null`), sem círculo pra
+    // enquadrar a câmera só centraliza no usuário com o zoom "de
+    // navegação" padrão (14) -- o mesmo usado antes de qualquer raio
+    // existir no app, e o mesmo que `_atualizarLocalizacaoEBuscar` usa na
+    // primeira localização.
+    final centro = LatLng(latitude, longitude);
+    if (_raioSelecionado != null) {
+      _ajustarCameraParaRaio(centro, _raioSelecionado!.km * 1000);
+    } else {
+      _mapController.move(centro, 14);
+    }
   }
 
   /// Ver comentário em `_buscar` acima. Calcula a "caixa" (bounding box) do
@@ -216,9 +249,26 @@ class _MapaScreenState extends State<MapaScreen> {
 
   /// Mesmo espírito de `_aoMudarSubcategoria` acima -- trocar o raio ou a
   /// ordenação já rebusca na hora, reativo, sem botão "aplicar" separado.
+  ///
+  /// TOGGLE: tocar num chip que já está ativo desliga o filtro (`null`) em
+  /// vez de não fazer nada -- só um raio ativo por vez, ou nenhum. Isso é
+  /// tudo que `_aoMudarRaio` precisa saber sobre "desligar": o resto (sumir
+  /// o círculo do mapa, desmarcar o chip, a busca cair no padrão do
+  /// backend) já é consequência automática de `_raioSelecionado` virar
+  /// `null` -- não tem um caminho de código separado pra "remover" nada.
   void _aoMudarRaio(_OpcaoRaio opcao) {
-    if (opcao == _raioSelecionado) return;
-    setState(() => _raioSelecionado = opcao);
+    final desativando = opcao == _raioSelecionado;
+    setState(() {
+      _raioSelecionado = desativando ? null : opcao;
+      // Só atualiza a "memória" do círculo quando ESTÁ ativando um raio --
+      // ver comentário completo no campo `_ultimoRaioComCirculo`. Ao
+      // desativar, deixa o valor antigo aí de propósito, pra o círculo
+      // desaparecer do mesmo tamanho (só perdendo opacidade) em vez de
+      // encolher e desaparecer ao mesmo tempo.
+      if (!desativando) {
+        _ultimoRaioComCirculo = opcao;
+      }
+    });
     final posicao = context.read<LocalizacaoProvider>().posicao;
     if (posicao != null) {
       _buscar(posicao.latitude, posicao.longitude);
@@ -256,6 +306,10 @@ class _MapaScreenState extends State<MapaScreen> {
     // Cor do círculo do raio -- puxa do tema central (ver core/theme/app_theme.dart)
     // em vez de fixar uma cor aqui, pra ficar automaticamente consistente com o
     // resto da identidade visual do app (e acompanhar se o tema mudar no futuro).
+    // A cor de base do tema (`AppColors.destaque`, um verde-azulado) já cai
+    // naturalmente na paleta "azul ou verde" pedida -- o efeito "pastel"
+    // pedido vem de baixar bastante a opacidade (abaixo), não de trocar a
+    // cor em si.
     final corRaio = Theme.of(context).colorScheme.primary;
 
     final marcadores = <Marker>[
@@ -427,35 +481,59 @@ class _MapaScreenState extends State<MapaScreen> {
                 // translúcido desenha por baixo dos pinos dos profissionais, nunca
                 // por cima escondendo-os.
                 //
-                // `TweenAnimationBuilder` sozinho, sem `AnimationController`
-                // manual: ele detecta a troca de `_raioSelecionado.km` a cada
-                // rebuild e anima o valor atual do raio (em metros) suavemente até
-                // o novo alvo -- é o que faz o círculo "crescer"/"encolher" ao
-                // trocar de 2km pra 15km, em vez de saltar de um tamanho pro outro.
-                if (posicaoAtual != null)
-                  TweenAnimationBuilder<double>(
-                    tween: Tween<double>(begin: 0, end: _raioSelecionado.km * 1000),
-                    duration: const Duration(milliseconds: 450),
+                // Sempre presente na árvore quando existe algum raio "conhecido"
+                // (`_ultimoRaioComCirculo`) -- mesmo com o toggle desligado --
+                // porque é isso que permite o `AnimatedOpacity` abaixo animar de
+                // verdade a transição de aparecer/sumir (widget removido da árvore
+                // não tem entrada/saída animada; a opacidade indo a 0 é o que
+                // simula o "removeLayer" pedido, sem tirar o widget do lugar no
+                // meio da animação).
+                if (posicaoAtual != null && _ultimoRaioComCirculo != null)
+                  AnimatedOpacity(
+                    opacity: _raioSelecionado != null ? 1 : 0,
+                    duration: const Duration(milliseconds: 300),
                     curve: Curves.easeInOut,
-                    builder: (context, raioAnimadoEmMetros, child) {
-                      return CircleLayer(
-                        circles: [
-                          CircleMarker(
-                            point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
-                            radius: raioAnimadoEmMetros,
-                            useRadiusInMeter: true,
-                            // Preenchimento suave e translúcido...
-                            color: corRaio.withValues(alpha: 0.16),
-                            // ...com borda na MESMA cor, mas bem menos transparente --
-                            // o contraste de opacidade entre preenchimento e borda é o
-                            // que dá a leitura de "borda levemente mais escura
-                            // delimitando o raio", sem precisar de uma segunda cor.
-                            borderColor: corRaio.withValues(alpha: 0.65),
-                            borderStrokeWidth: 2,
-                          ),
-                        ],
-                      );
-                    },
+                    // `TweenAnimationBuilder` sozinho, sem `AnimationController`
+                    // manual: ele detecta a troca de `_ultimoRaioComCirculo.km` a
+                    // cada rebuild e anima o valor atual do raio (em metros)
+                    // suavemente até o novo alvo -- é o que faz o círculo
+                    // "crescer"/"encolher" ao trocar de 2km pra 15km, em vez de
+                    // saltar de um tamanho pro outro. Ao desligar o toggle, o
+                    // valor não muda (ver comentário no campo), então só a
+                    // opacidade acima anima -- o círculo desaparece do mesmo
+                    // tamanho, sem "implodir" no processo.
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
+                      duration: const Duration(milliseconds: 450),
+                      curve: Curves.easeInOut,
+                      builder: (context, raioAnimadoEmMetros, child) {
+                        return CircleLayer(
+                          circles: [
+                            CircleMarker(
+                              point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
+                              radius: raioAnimadoEmMetros,
+                              useRadiusInMeter: true,
+                              // Preenchimento pastel e bem translúcido -- suavizado
+                              // a pedido (a versão anterior estava "agressiva"
+                              // demais): opacidade baixa o suficiente pra não
+                              // esconder os detalhes do mapa nem as fotos dos
+                              // profissionais por baixo.
+                              color: corRaio.withValues(alpha: 0.10),
+                              // Borda FINA (1.2, contra os 2 de antes) e bem mais
+                              // transparente (0.3 -- o valor pedido) que o
+                              // preenchimento, pra marcar o limite do raio sem
+                              // "gritar" na tela. `flutter_map` não tem suporte
+                              // nativo a borda tracejada em `CircleMarker` (só
+                              // `Polyline` tem `isDotted`); como o pedido permitia
+                              // "tracejada OU levemente transparente", a rota mais
+                              // simples e visualmente equivalente foi essa.
+                              borderColor: corRaio.withValues(alpha: 0.3),
+                              borderStrokeWidth: 1.2,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
                   ),
 
                 MarkerLayer(markers: marcadores),
