@@ -41,13 +41,19 @@ Ao buscar profissionais no mapa, apareceu **"Erro interno do servidor"**. Causa 
 
 **Solução:** rodar a migração no Neon (SQL Editor ou `psql`) e reiniciar o backend. Instruções detalhadas já foram passadas no chat.
 
+### Ambiente de desenvolvimento configurado (12/07/2026, sessão de setup)
+Máquina de desenvolvimento preparada do zero: `npm install` no backend, Flutter SDK 3.44.6 instalado (`C:\src\flutter`, adicionado ao PATH), extensões Dart/Flutter no VS Code, Modo de Desenvolvedor do Windows ativado (necessário para o Flutter criar symlinks de plugins), `flutter pub get` rodado no `app/`. `flutter doctor` mostra Chrome OK; Android toolchain e Visual Studio (apps Windows) pendentes, mas não bloqueiam o fluxo atual (dev via `flutter run -d chrome`).
+
+**Migração 04 aplicada no Neon** (via script Node com o driver `pg`, já que `psql` não está instalado na máquina) — colunas `descricao` e `url_foto_perfil` confirmadas em `profissionais`. Testado `GET /profissionais/proximos`: retorna os profissionais normalmente, bug do "Erro interno do servidor" no mapa **resolvido**.
+
+**Conferido o estado geral do banco:** migrações `05`, `06`, `07` e `08` (das sessões de continuação registradas mais abaixo neste arquivo) já estavam aplicadas no Neon — só a `04` estava pendente de verdade. Banco agora com o schema completo (01 a 08) confirmado por consulta direta ao `information_schema`.
+
 ### Pendências para a próxima sessão
-1. **Rodar a migração 04 no Neon** e reiniciar o backend — sem isso, a busca no mapa continua quebrada.
-2. Testar ponta a ponta: buscar no mapa → abrir perfil de um profissional → editar o próprio perfil (logado como profissional) → foto e descrição aparecendo certo.
-3. Confirmar se o fix de upload de foto na avaliação (Content-Type/MediaType, feito antes de hoje) realmente resolveu o erro "Envie uma imagem JPEG, PNG ou WEBP."
-4. **Task pendente (arquitetura):** portabilidade — Dockerfile do backend + trocar armazenamento de fotos em disco local por algo S3-compatible (ex.: Cloudflare R2) antes de qualquer deploy real. Ainda não iniciado, só planejado.
-5. Emulador Android com crash nativo (ART) segue sem solução confirmada — desenvolvimento tem sido feito via Chrome web como alternativa. Cold boot do emulador foi sugerido, não testado.
-6. Considerar permitir limpar a descrição (hoje, mandar texto vazio é tratado como "não mudar nada" — comportamento consistente dos dois lados, mas vale documentar/ajustar se incomodar no uso real).
+1. Testar ponta a ponta no app (Flutter): buscar no mapa → abrir perfil de um profissional → editar o próprio perfil (logado como profissional) → foto e descrição aparecendo certo.
+2. Confirmar se o fix de upload de foto na avaliação (Content-Type/MediaType, feito antes de hoje) realmente resolveu o erro "Envie uma imagem JPEG, PNG ou WEBP."
+3. **Task pendente (arquitetura):** portabilidade — Dockerfile do backend + trocar armazenamento de fotos em disco local por algo S3-compatible (ex.: Cloudflare R2) antes de qualquer deploy real. Ainda não iniciado, só planejado.
+4. Emulador Android com crash nativo (ART) segue sem solução confirmada — desenvolvimento tem sido feito via Chrome web como alternativa. Cold boot do emulador foi sugerido, não testado. Android toolchain do Flutter (Android Studio + SDK) ainda não foi instalado nesta máquina.
+5. Considerar permitir limpar a descrição (hoje, mandar texto vazio é tratado como "não mudar nada" — comportamento consistente dos dois lados, mas vale documentar/ajustar se incomodar no uso real).
 
 ### Arquivos novos ou alterados hoje
 
@@ -210,6 +216,64 @@ No primeiro commit desta etapa, `git add -A` reportou `error: bad signature 0x00
 
 ---
 
+## Sessão de 12/07/2026 (continuação 5 — Etapa 9: Docker + storage S3-compatible)
+
+### Contexto no início desta continuação
+Ambiente de dev já preparado (sessão de setup anterior): backend rodando, todas as migrações (04-08) confirmadas aplicadas no Neon, bug do mapa resolvido. Faltava só o item de arquitetura "portabilidade" que aparecia como pendência em várias sessões anteriores: Dockerfile + trocar upload de fotos em disco local por storage S3-compatible.
+
+### O que foi feito
+Objetivo: tornar a API stateless para poder escalar/redeployar em containers efêmeros sem perder arquivo de usuário.
+
+**1. Storage S3-compatible (Cloudflare R2 ou qualquer S3-compatible)**
+- Dependências novas: `@aws-sdk/client-s3`, `multer-s3` (dependencies), `@types/multer-s3` (devDependency — `multer-s3` não vem com tipos próprios).
+- `backend/src/services/uploadService.ts` (novo) — `S3Client` (endpoint/região/credenciais vindos de `env.s3`, `forcePathStyle: true` para compatibilidade com R2/MinIO), `criarStorageS3(prefixo)` (storage engine do multer-s3, chave aleatória `prefixo/uuid.ext`, nunca o nome original) e `filtroDeImagem` (mesma validação de tipo de sempre, compartilhada pelos dois uploads).
+- `backend/src/middlewares/upload.ts` — reescrito para usar `criarStorageS3('avaliacoes')`/`criarStorageS3('perfis')` em vez de `multer.diskStorage`. Como o multer-s3 já sobe o arquivo pro bucket DURANTE o próprio middleware, `req.file`/`req.files[i]` chegam na rota com `.location` (URL pública) pronta — as funções `urlPublicaDoArquivo`/`urlsPublicasDosArquivos`/`urlPublicaDoArquivoPerfil` continuam existindo (mesma assinatura de chamada nas rotas), só que agora só leem `.location` em vez de montar um caminho local.
+- `backend/src/routes/{avaliacoes,clientes,profissionais}.routes.ts` — só precisaram trocar o *type cast* de `Express.Multer.File` para `Express.MulterS3.File` (o `.location` só existe no tipo do multer-s3). Nenhuma outra rota, repository ou lógica de negócio mudou.
+- `backend/src/app.ts` — removida a rota estática `/uploads` (`express.static`): não faz mais sentido, nenhum arquivo é mais escrito em disco.
+- `backend/src/env.ts` — `env.s3` novo: `endpoint`, `region` (padrão `'auto'`), `bucketName`, `accessKeyId`, `secretAccessKey`. Todos **obrigatórios** (mesmo padrão de `DB_*`/`JWT_SECRET`) — decisão consciente: a API é stateless **inclusive em desenvolvimento**, para o comportamento nunca divergir entre ambientes. **Efeito colateral importante:** rodar `npm run dev` agora exige um bucket S3-compatible de verdade (ex.: Cloudflare R2, tier free) mesmo localmente — antes bastava clonar e rodar. Documentado no `.env.example` e no `CONTRIBUTING.md`.
+- App Flutter: **nenhuma mudança necessária**. `ApiConfig.urlAbsoluta()` (`app/lib/core/config/api_config.dart`) já tinha `if (caminhoRelativo.startsWith('http')) return caminhoRelativo;` — como as URLs do multer-s3 já vêm absolutas (`https://...`), o helper só repassa. A promessa antiga do comentário em `upload.ts` ("todo o resto do sistema continua igual, só guardamos uma URL") se confirmou na prática.
+
+**2. Dockerfile**
+- `backend/Dockerfile` já existia de uma sessão anterior e já seguia multi-stage build (`node:20-alpine`, estágio `builder` com `npm install` + `npm run build`, estágio `runner` copiando só `package.json`+`dist/` e rodando `npm install --only=production`, `EXPOSE 3333`, `CMD ["node", "dist/server.js"]`) — não precisou de mudança.
+- `backend/.dockerignore` estava **vazio** (0 bytes) — populado agora com `node_modules`, `dist`, `.env`/`.env.*` (exceto `.env.example`), `.git`, `uploads`.
+
+### Verificação feita
+- `cd backend && npx tsc --noEmit` — sem erros (inclusive depois de trocar os type casts para `Express.MulterS3.File`).
+- `npm run build` — sem erros.
+- Confirmado que `npm run dev` agora falha rápido e com mensagem clara (`[env] Variavel de ambiente obrigatoria ausente: S3_ENDPOINT...`) se as variáveis `S3_*` não estiverem no `.env` — comportamento esperado, mesmo padrão de erro já usado para `DB_*`.
+- **Não foi possível testar um upload real** (nenhuma credencial S3/R2 configurada neste ambiente ainda) nem `docker build` (Docker não está instalado nesta máquina).
+
+### Pendências para a próxima sessão
+1. Se quiser validar a imagem Docker, instalar o Docker Desktop nesta máquina e rodar `docker build` a partir de `backend/`.
+2. Rodar as migrações `07` e `08` no Neon se ainda não tiver feito (ver sessão anterior).
+3. Emulador Android com crash nativo (ART) segue sem solução confirmada.
+4. Apagar a conta de teste criada durante a validação (`teste.upload.r2@example.com`, profissional PF "Teste Upload R2") quando não precisar mais dela.
+
+### Bucket R2 configurado e testado ponta a ponta (mesmo dia, continuação)
+Bucket `servicos-manaus-uploads` criado no Cloudflare R2, público via R2.dev subdomain, API Token de conta gerado. `.env` preenchido com `S3_ENDPOINT`/`S3_BUCKET_NAME`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`.
+
+**Bug pego e corrigido antes mesmo do teste manual:** o `.location` que o `multer-s3` devolve é montado a partir do `S3_ENDPOINT` (a API S3, que exige assinatura AWS até para GET) — **não** é a URL pública do bucket. Se tivéssemos usado `.location` direto, toda foto salva no banco teria uma URL que o app nunca conseguiria carregar. Corrigido adicionando `S3_PUBLIC_URL_BASE` (a URL do R2.dev subdomain) ao `env.ts`, e trocando `urlPublicaDoArquivo`/`urlsPublicasDosArquivos`/`urlPublicaDoArquivoPerfil` (`middlewares/upload.ts`) para montar a URL como `${S3_PUBLIC_URL_BASE}/${arquivo.key}` em vez de usar `arquivo.location`.
+
+**Teste manual real, pelo app (Flutter Web/Chrome):** login como profissional de teste → editar perfil → trocar foto + descrição → salvar. Backend salvou a URL certa no banco (confirmado via query direta: `https://pub-....r2.dev/perfis/<uuid>.jpg`) e a URL respondia 200/`image/jpeg` via curl — mas **a foto não aparecia no app**.
+
+**Segundo bug, achado testando de verdade (não teria aparecido só com typecheck/curl):** o bucket R2 não tinha política de **CORS** configurada. `curl` direto funciona sem CORS (não é o navegador aplicando a regra), mas o Flutter Web (renderer CanvasKit) busca a imagem via `fetch()`, que o navegador bloqueia sem os cabeçalhos `Access-Control-Allow-*`. Confirmado com `curl -I -X OPTIONS ... -H "Origin: ..."` devolvendo 403 antes da correção.
+
+**Correção:** usuário adicionou uma CORS Policy no bucket (painel R2 → bucket → Settings → CORS Policy):
+```json
+[{ "AllowedOrigins": ["*"], "AllowedMethods": ["GET", "HEAD"], "AllowedHeaders": ["*"], "MaxAgeSeconds": 3600 }]
+```
+`AllowedOrigins: ["*"]` é aceitável nesta fase (dev/teste); quando o app tiver domínio de produção fixo, trocar pelo domínio real. Depois da mudança, `OPTIONS` passou a devolver `204` com `Access-Control-Allow-Origin: *`, e a foto passou a carregar no app. **Confirmado pelo usuário testando ao vivo no Chrome.**
+
+### Verificação feita (atualizada)
+- Upload real via app (não só script) testado ponta a ponta: editar perfil → foto sobe pro R2 → URL salva no banco → imagem carrega na tela.
+- `curl` confirmando 200 + `Content-Type: image/jpeg` na URL pública, e confirmando os cabeçalhos CORS antes/depois da correção.
+- Segue pendente: `docker build` (Docker não instalado nesta máquina).
+
+### Dados fictícios de teste criados
+20 profissionais + 20 clientes cadastrados via `POST /auth/cadastro/{profissional,cliente}` (script `seed_fake_users.js`, não versionado — rodou direto contra a API local). Senha padrão de todos: `Manaus123`. E-mails no padrão `nome.sobrenome.prof@teste.com` (profissionais) e `nome.sobrenome.cliente.cli@teste.com` (clientes). Profissionais com profissão variada e coordenadas aleatórias dentro da área urbana de Manaus (aparecem na busca do mapa). **Lembrar de apagar esses registros (e a conta `teste.upload.r2@example.com`) antes de qualquer lançamento real** — são só para preencher o app durante o desenvolvimento.
+
+---
+
 ## Sessão de 13/07/2026 — Seleção de categoria em cascata (chip input)
 
 ### Pedido
@@ -241,7 +305,7 @@ Substituir os campos de texto livre "profissão" (PF) e "categoria de atuação"
 2. Testar ponta a ponta de verdade: abrir cadastro como profissional (PF e PJ) → tocar no seletor → escolher categoria → escolher subcategoria → ver os dois chips → tentar remover um chip → cadastrar e conferir que o perfil público mostra a subcategoria escolhida em `atuacao`.
 3. Considerar expor `categoria` (não só `atuacao`/subcategoria) na tela de perfil público, já que o backend agora devolve os dois — hoje só `atuacao` é exibida.
 4. Avaliar se vale permitir EDITAR a categoria depois do cadastro (hoje, igual a antes, só é definida na hora de criar a conta — não existe campo no `PATCH /profissionais/me`).
-5. Itens antigos ainda pendentes: Dockerfile do backend + armazenamento S3-compatible antes de deploy real; emulador Android com crash nativo (ART) sem solução confirmada.
+5. ~~Dockerfile do backend + armazenamento S3-compatible~~ — feito na sessão "Etapa 9" acima (mesmo dia). Emulador Android com crash nativo (ART) segue sem solução confirmada.
 
 ---
 
@@ -667,4 +731,6 @@ Uma segunda fonte do mesmo tipo de bug foi encontrada ao revisar o código: `_ra
 
 ### Pendências para a próxima sessão
 1. **Testar de verdade** no Flutter: abrir "Mais próximos" sem selecionar raio nenhum e confirmar que profissionais distantes aparecem; escolher um raio, trocar para "Melhor custo-benefício" e confirmar que a lista deixa de estar restrita por aquele raio.
-2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
+2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações. (Dockerfile do backend + armazenamento S3-compatible já foram feitos -- ver sessão "Etapa 9" acima.)
+
+

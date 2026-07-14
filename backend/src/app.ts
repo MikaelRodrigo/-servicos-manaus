@@ -1,6 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import path from 'node:path';
 import { env } from './env';
 import { profissionaisRouter } from './routes/profissionais.routes';
 import { clientesRouter } from './routes/clientes.routes';
@@ -43,12 +42,6 @@ app.use((req, _res, next) => {
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', ambiente: env.nodeEnv, timestamp: new Date().toISOString() });
 });
-
-// Serve os arquivos de uploads/avaliacoes/ como arquivo estático, na URL
-// /uploads/avaliacoes/<nome>. É essa URL que vai parar em `url_foto_servico`.
-// Lembrete da Etapa "Avaliações": isto é armazenamento em DISCO LOCAL,
-// bom para aprender, mas não sobrevive a um deploy num container efêmero.
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 app.use('/profissionais', profissionaisRouter);
 app.use('/clientes', clientesRouter);

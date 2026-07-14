@@ -84,7 +84,7 @@ avaliacoesRouter.post(
       // `req.file` como o antigo `.single(...)`. Sem nenhuma foto enviada,
       // `req.files` chega como array vazio -- por isso o `?? []` não é nem
       // necessário aqui, mas o cast garante o tipo certo pro TypeScript.
-      const arquivos = (req.files as Express.Multer.File[] | undefined) ?? [];
+      const arquivos = (req.files as Express.MulterS3.File[] | undefined) ?? [];
       const urlsFotos = urlsPublicasDosArquivos(arquivos);
 
       let avaliacao;

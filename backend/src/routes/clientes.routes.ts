@@ -61,7 +61,9 @@ clientesRouter.patch(
           : undefined;
 
       const endereco = textoOpcional(req.body.endereco, 'endereco', 500);
-      const urlFotoPerfil = req.file ? urlPublicaDoArquivoPerfil(req.file) : undefined;
+      const urlFotoPerfil = req.file
+        ? urlPublicaDoArquivoPerfil(req.file as Express.MulterS3.File)
+        : undefined;
 
       if (contato === undefined && endereco === undefined && urlFotoPerfil === undefined) {
         throw new ErroDeValidacao(
