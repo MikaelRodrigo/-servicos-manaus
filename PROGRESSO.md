@@ -615,3 +615,27 @@ Implementar visualização do raio de busca selecionado como um círculo (overla
 ### Pendências para a próxima sessão
 1. **Testar de verdade** no Flutter: selecionar diferentes raios e confirmar visualmente o círculo (cor, transparência, borda), a animação de expansão/encolhimento, e o enquadramento automático da câmera.
 2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
+
+---
+
+## Sessão de 13/07/2026 (continuação — raio de busca vira toggle + suavização estética do círculo)
+
+### Pedido
+Ajustar o círculo de raio adicionado na sessão anterior: (1) os chips de distância (2/5/8/15km, 15km+) devem funcionar como toggle -- tocar num chip já ativo remove o círculo e desmarca o botão, só um raio ativo por vez ou nenhum; (2) suavizar a estética -- paleta pastel azul/verde, borda fina/tracejada ou translúcida (opacity 0.3), transição de opacidade suave ao aparecer/desaparecer; (3) manter a centralização no usuário com animação de tamanho agradável.
+
+### O que foi feito
+- `app/lib/screens/mapa_screen.dart`: `_raioSelecionado` virou nullable (`_OpcaoRaio?`, default `null`). `_aoMudarRaio` agora verifica se o chip tocado já é o ativo -- se for, desliga (`null`) em vez de reseleciona; `selected: _raioSelecionado == opcao` nos chips já reflete isso automaticamente (nenhum marcado quando `null`). Novo campo `_ultimoRaioComCirculo` guarda o último raio exibido mesmo depois do toggle desligar -- existe só para a animação: sem isso, desligar faria o círculo encolher E sumir ao mesmo tempo; com isso, só a opacidade anima (círculo desaparece do mesmo tamanho). O círculo (`CircleLayer`) ficou envolvido num `AnimatedOpacity` (300ms) por cima do `TweenAnimationBuilder` de raio já existente (450ms) -- o widget nunca é removido da árvore enquanto existe algum raio já visto, é isso que permite ao `AnimatedOpacity` animar de verdade a entrada/saída. `_buscar`: quando não há raio ativo, centraliza no usuário com zoom padrão (14) em vez de tentar enquadrar um círculo inexistente.
+- Estética: preenchimento `alpha 0.16 -> 0.10`, borda `alpha 0.65 -> 0.3` (o valor pedido) e largura `2 -> 1.2` (fina). `flutter_map` não expõe borda tracejada em `CircleMarker` (só `Polyline` tem `isDotted`) -- como o pedido aceitava "tracejada OU levemente transparente", ficou com a opacidade. Cor continua vindo do tema central (`Theme.colorScheme.primary`, verde-azulado), não fixada -- já cai na paleta pedida.
+- `app/lib/data/services/profissionais_service.dart` / `app/lib/providers/profissionais_provider.dart`: `raioKm` virou `double?` (era `double = 5`). Quando `null`, o parâmetro `raio_km` simplesmente não é mandado na request -- o backend já tem um padrão pronto pra isso (5km, `numeroOpcional(req.query.raio_km, 'raio_km', 5)` em `profissionais.routes.ts`), então nenhuma mudança de backend foi necessária: a busca continua funcionando normalmente com o toggle desligado, só sem um raio "escolhido à mão".
+
+### Verificação feita
+- **Corrupção de mount de novo** (mesmo bug recorrente): os três arquivos apareceram truncados no mount depois das edições -- reescritos por inteiro via heredoc a partir do conteúdo autoritativo, reconferidos (`wc -l`/`tail`/`file`).
+- Balanceamento de chaves/parênteses/colchetes (script Python) -- OK nos três arquivos.
+- `npx tsc --noEmit` no backend -- limpo (nenhum arquivo de backend foi tocado nesta sessão, confirmando que a mudança ficou 100% no lado Flutter).
+- `git diff --stat` conferido antes do commit -- só os 3 arquivos pretendidos, 123 inserções/36 remoções.
+- Commit `5016cf0`.
+- **Não foi possível rodar `flutter run` neste sandbox** -- a transição de opacidade, o comportamento de toggle (tocar duas vezes no mesmo chip) e a paleta suavizada não puderam ser observados na prática.
+
+### Pendências para a próxima sessão
+1. **Testar de verdade** no Flutter: tocar duas vezes no mesmo chip de raio e confirmar que o círculo desaparece suavemente (sem "pular") e o chip desmarca; conferir visualmente a nova paleta pastel.
+2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo relatado anteriormente ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; Dockerfile do backend + armazenamento S3-compatible antes de deploy real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
