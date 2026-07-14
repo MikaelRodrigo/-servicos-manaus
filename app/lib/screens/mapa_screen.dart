@@ -39,11 +39,12 @@ const _limiteDeProfissionaisNoMapa = 200;
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
 /// não mandar o parâmetro, que já é o padrão "distancia" no backend). São os
-/// TRÊS botões fixos da barra principal -- o raio de proximidade (abaixo)
-/// só faz sentido escolher "à mão" quando a ordenação é por distância; nos
-/// outros dois casos ele continua definindo até onde a busca alcança, só
-/// que sem controle visível (ver `_OpcaoRaio` e o `AnimatedCrossFade` no
-/// `build`).
+/// TRÊS botões fixos da barra principal -- o raio de proximidade (abaixo) só
+/// existe (visual e FUNCIONALMENTE) quando a ordenação é "Mais próximos"
+/// (`distancia`); trocar para qualquer um dos outros dois LIMPA o raio
+/// escolhido automaticamente (ver `_aoMudarOrdenacao`) -- nos outros dois
+/// modos a busca nunca fica restrita por um raio "esquecido" em segundo
+/// plano (ver `_OpcaoRaio` e o `AnimatedCrossFade` no `build`).
 enum _OrdenacaoBusca {
   distancia('Mais próximos', null),
   melhorCustoBeneficio('Melhor custo-benefício', 'melhor_custo_beneficio'),
@@ -95,19 +96,20 @@ class _MapaScreenState extends State<MapaScreen> {
   // dos dois já rebusca automaticamente (ver `_aoMudarRaio`/`_aoMudarOrdenacao`),
   // sem precisar de um botão "aplicar" separado.
   //
-  // `_raioSelecionado` NUNCA é resetado ao trocar de ordenação -- só a
-  // LINHA de chips que escolhe ele fica visível/invisível (requisito 4:
-  // "estado do filtro mantido de forma intuitiva"). Trocar para "Melhores
-  // avaliados" e voltar para "Mais próximos" preserva o raio que a pessoa
-  // tinha escolhido antes, em vez de voltar pro padrão toda vez.
+  // NULLABLE de propósito: cada chip de raio funciona como um TOGGLE --
+  // tocar num chip já ativo desliga o filtro (volta pra `null`), em vez de
+  // ficar sempre preso a uma das cinco opções. `null` = "nenhum raio
+  // escolhido à mão" -- ver o comentário grande em `_buscar` sobre o que
+  // isso significa de verdade pra busca (mostrar TODO MUNDO da categoria,
+  // sem "cerca" nenhuma vindo do botão "Mais próximos" sozinho).
   //
-  // Agora é NULLABLE de propósito: cada chip de raio funciona como um
-  // TOGGLE -- tocar num chip já ativo desliga o filtro (volta pra `null`),
-  // em vez de ficar sempre preso a uma das cinco opções. `null` = "nenhum
-  // raio escolhido à mão" -- a busca continua funcionando normalmente (o
-  // backend cai no próprio padrão dele, 5km -- ver
-  // `ProfissionaisService.buscarProximos`), só sem o círculo do raio
-  // desenhado no mapa nem nenhum chip marcado.
+  // AGORA É RESETADO ao trocar de ordenação (`_aoMudarOrdenacao`) --
+  // diferente de uma versão anterior deste código, que preservava o raio
+  // escolhido "em segundo plano" ao trocar pra "Melhor custo-benefício"/
+  // "Melhores avaliados". Isso causava exatamente o bug relatado: um raio
+  // curto escolhido em "Mais próximos" continuava filtrando a busca
+  // silenciosamente depois de trocar de aba, sem nenhum chip marcado pra
+  // indicar isso. Cada troca de modo agora começa com o raio limpo.
   _OpcaoRaio? _raioSelecionado;
 
   // Guarda o ÚLTIMO raio que teve um círculo desenhado, mesmo depois de
@@ -166,10 +168,25 @@ class _MapaScreenState extends State<MapaScreen> {
     await provider.buscarProximos(
       latitude: latitude,
       longitude: longitude,
-      // `null` quando o toggle de raio está desligado -- o serviço já sabe
-      // omitir `raio_km` da request nesse caso, e o backend cai no próprio
-      // padrão dele (5km).
-      raioKm: _raioSelecionado?.km,
+      // BUG CORRIGIDO NESTA SESSÃO: antes, `_raioSelecionado?.km` virava
+      // `null` quando nenhum raio estava ativo, e o serviço OMITIA
+      // `raio_km` da request -- o que parecia certo, mas o backend tem um
+      // padrão PRÓPRIO pra esse parâmetro quando ele não vem
+      // (`numeroOpcional(req.query.raio_km, 'raio_km', 5)` em
+      // profissionais.routes.ts): 5km. Ou seja, "nenhum raio escolhido" na
+      // prática virava "raio de 5km", uma cerca curta e INVISÍVEL --
+      // exatamente o bug relatado ("Mais próximos" escondendo profissionais
+      // além de 8km mesmo sem nenhum raio selecionado).
+      //
+      // O botão "Mais próximos" sozinho NÃO deve aplicar geofencing nenhum
+      // -- só o clique explícito num chip de distância deve. Como o backend
+      // não tem um "sem limite" de verdade (todo `raio_km` é validado entre
+      // 0.1 e `RAIO_MAXIMO_KM`, sempre um número finito), a forma honesta de
+      // pedir "sem restrição visível" é mandar o próprio TETO que o backend
+      // já aceita -- o mesmo valor que alimenta o chip "Mais que 15km"
+      // (`_OpcaoRaio.maisDe15km.km`, 50km) -- em vez de deixar a omissão
+      // cair num padrão bem mais curto sem ninguém pedir.
+      raioKm: _raioSelecionado?.km ?? _OpcaoRaio.maisDe15km.km,
       subcategoriaId: _subcategoriaSelecionada?.id,
       ordenarPor: _ordenacaoSelecionada.valorApi,
       limite: _limiteDeProfissionaisNoMapa,
@@ -275,9 +292,22 @@ class _MapaScreenState extends State<MapaScreen> {
     }
   }
 
+  /// Trocar de modo de ordenação agora LIMPA o raio automaticamente
+  /// (requisito: "se o usuário clicar em 'Mais próximos' e depois decidir
+  /// mudar para 'Melhor custo-benefício', o filtro de distância deve ser
+  /// limpo, garantindo que nenhum raio indesejado fique aplicado em segundo
+  /// plano"). Isso vale nos dois sentidos -- sair de "Mais próximos" limpa,
+  /// e voltar pra "Mais próximos" também começa limpo (sem raio
+  /// pré-aplicado, só a linha de chips reaparecendo vazia). O círculo no
+  /// mapa e a busca em si já refletem isso sozinhos assim que
+  /// `_raioSelecionado` vira `null` -- não tem lógica extra pra "esconder"
+  /// nada além disso.
   void _aoMudarOrdenacao(_OrdenacaoBusca ordenacao) {
     if (ordenacao == _ordenacaoSelecionada) return;
-    setState(() => _ordenacaoSelecionada = ordenacao);
+    setState(() {
+      _ordenacaoSelecionada = ordenacao;
+      _raioSelecionado = null;
+    });
     final posicao = context.read<LocalizacaoProvider>().posicao;
     if (posicao != null) {
       _buscar(posicao.latitude, posicao.longitude);
