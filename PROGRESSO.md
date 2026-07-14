@@ -771,6 +771,39 @@ Merge commit `69dca79` ("Merge branch 'main' of https://github.com/MikaelRodrigo
 - **Não foi possível** rodar `npm install`/`tsc --noEmit` 100% limpo (rede do sandbox bloqueada para pacotes npm específicos) nem confirmar o `docker build` funcionando com as novas dependências.
 
 ### Pendências para a próxima sessão
-1. **Rodar `git push origin main` a partir de uma máquina com acesso real ao GitHub** (o commit `69dca79` já está pronto localmente, só falta enviar) — este sandbox não consegue alcançar `github.com` pela rede.
-2. Depois do push, rodar `npm install` numa máquina com rede/tempo suficiente e confirmar `npx tsc --noEmit` limpo com as dependências novas do colaborador (S3) instaladas de verdade.
-3. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo ("Diego"/"Patrícia") num ambiente real; rodar migrações `07`-`10` no Neon; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações; validar upload real com as credenciais S3/R2 do colaborador em um ambiente com rede.
+1. Depois do push, rodar `npm install` numa máquina com rede/tempo suficiente e confirmar `npx tsc --noEmit` limpo com as dependências novas do colaborador (S3) instaladas de verdade.
+2. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo ("Diego"/"Patrícia") num ambiente real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações; validar upload real com as credenciais S3/R2 do colaborador em um ambiente com rede.
+
+### Atualização: `git push` concluído pelo usuário
+O usuário rodou `git push origin main` na própria máquina (fora deste sandbox, que não tem rede liberada para `github.com`) e confirmou sucesso: `e9241b5..e05f619 main -> main`. O GitHub está com tudo — merge + documentação — sincronizado.
+
+---
+
+## Sessão de 13/07/2026 (continuação — rodar migrações 07-10 no Neon)
+
+### Pedido
+Continuação direta da sessão anterior: rodar as migrações pendentes no banco Neon real, já que este sandbox não tem acesso de rede ao banco (confirmado por falha de resolução DNS ao tentar conectar em `ep-old-fog-acwztrpz.sa-east-1.aws.neon.tech`).
+
+### Diagnóstico via query no Neon (rodada pelo usuário)
+Preparei uma query de diagnóstico (`database/_diagnostico_migracoes_pendentes.sql`, nova) checando `information_schema`/`pg_constraint` para cada migração 07-10, em vez de assumir o estado do banco a partir do histórico (que tinha registros conflitantes de sessões anteriores sobre o que já tinha sido aplicado). Resultado rodado pelo usuário no SQL Editor do Neon: migrações **07, 08 e 09 já estavam aplicadas** (view do portfólio com foto do cliente, CEP, tabelas categorias/subcategorias + FK composta + CHECK) — só a **10 (backfill)** faltava, com 3 de 25 profissionais ainda sem `categoria_id`/`subcategoria_id`.
+
+### Bug real encontrado ao rodar a migração 10 (não era corrupção de sandbox desta vez)
+O usuário rodou `10_backfill_categoria_subcategoria.sql` no SQL Editor do Neon e a Seção 3 (backfill inteligente por nome) falhou com `ERROR: invalid reference to FROM-clause entry for table "p" (SQLSTATE 42P10)`. Causa: a query usava `UPDATE profissionais p ... FROM LATERAL (SELECT ... WHERE ... p.profissao ...) AS melhor` — o PostgreSQL **não permite** que um `LATERAL` dentro do `FROM` de um `UPDATE` referencie a própria tabela-alvo do `UPDATE` (`p`); essa tabela só fica visível para as cláusulas `SET`/`WHERE` de fora, não para um `FROM`-item `LATERAL`. Isso não tinha como ser pego por revisão estática de código nem por `tsc` (é SQL puro, sem parser TypeScript) — só apareceu ao rodar de verdade contra o Postgres real, confirmando o valor de ter finalmente conseguido rodar as migrações num ambiente com banco de verdade.
+
+**Correção**: reescrita a Seção 3 como um self-join em vez de `LATERAL` — uma subquery com um alias próprio (`p2`) busca o melhor match (`DISTINCT ON (p2.profissional_id) ... ORDER BY p2.profissional_id, length(sc.nome) DESC`) para cada profissional pendente, e o `UPDATE` de fora só correlaciona pelo `profissional_id` no `WHERE`. Mesmo resultado lógico da versão original (mesmo critério de "nome mais específico" em caso de ambiguidade), só que numa forma que o Postgres aceita.
+
+As Seções 1-2 (INSERT da categoria/subcategoria "Outros", com `ON CONFLICT DO NOTHING`) já tinham rodado com sucesso antes do erro e são idempotentes — não precisaram ser desfeitas. O usuário rodou o arquivo corrigido por inteiro e confirmou sucesso.
+
+### O que foi feito
+- `database/10_backfill_categoria_subcategoria.sql` — Seção 3 reescrita (LATERAL → self-join), com nota explicando o erro real (SQLSTATE 42P10) e por que a reescrita funciona.
+- `database/_diagnostico_migracoes_pendentes.sql` (novo) — query reutilizável para checar rapidamente, via `information_schema`/`pg_constraint`, quais das migrações 07-10 já estão aplicadas num banco Neon, sem precisar confiar no histórico de sessões anteriores (que tinha ficado inconsistente).
+
+### Verificação feita
+- Query de diagnóstico rodada pelo usuário no Neon **antes** de qualquer migração ser reaplicada, confirmando exatamente o que faltava (evitou reaplicar 07-09 sem necessidade, que teriam falhado nos `ADD CONSTRAINT` sem `IF NOT EXISTS`).
+- Migração 10 corrigida rodada pelo usuário até o fim no SQL Editor do Neon, sem erro.
+- **Pendente de confirmação**: o bloco `RAISE NOTICE` final (Seção 5) mostra quantos profissionais ficaram sem categoria (esperado: 0) e quantos caíram em "Outros" — o usuário confirmou sucesso mas não colou esse número específico nesta sessão.
+
+### Pendências para a próxima sessão
+1. Conferir a saída do `RAISE NOTICE` da migração 10 (ou rodar `database/_diagnostico_migracoes_pendentes.sql` de novo — `profissionais_sem_categoria` deve estar em `0`).
+2. Testar de verdade no Flutter: filtrar por uma especialidade no mapa e confirmar que os profissionais antigos (os 3 que estavam sem categoria) aparecem normalmente.
+3. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo ("Diego"/"Patrícia") num ambiente real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações; rodar `npm install`/`tsc --noEmit` com as dependências S3 numa máquina com rede; validar upload real com as credenciais S3/R2 do colaborador.

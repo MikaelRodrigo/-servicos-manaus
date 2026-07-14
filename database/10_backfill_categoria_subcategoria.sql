@@ -67,19 +67,31 @@ ON CONFLICT (categoria_id, nome) DO NOTHING;
 --  um match arbitrário.
 -- ============================================================================
 
+-- NOTA: a versão original usava `FROM LATERAL (...)` referenciando `p`
+-- diretamente -- o Postgres não permite isso num UPDATE (erro real visto ao
+-- rodar: SQLSTATE 42P10, "invalid reference to FROM-clause entry for table
+-- 'p'"; a tabela-alvo do UPDATE só fica visível para o SET/WHERE de fora,
+-- não para um LATERAL dentro do FROM). Reescrito como self-join: a subquery
+-- busca o melhor match para CADA profissional pendente usando um alias
+-- próprio (p2), e o UPDATE de fora só correlaciona pelo ID -- mesmo
+-- resultado, sem a referência direta que o Postgres rejeita.
 UPDATE profissionais p
 SET categoria_id    = melhor.categoria_id,
     subcategoria_id = melhor.subcategoria_id
-FROM LATERAL (
-    SELECT sc.subcategoria_id, sc.categoria_id
-    FROM subcategorias sc
-    WHERE unaccent(lower(COALESCE(p.profissao, p.categoria_atuacao, '')))
-          LIKE '%' || unaccent(lower(sc.nome)) || '%'
-    ORDER BY length(sc.nome) DESC
-    LIMIT 1
+FROM (
+    SELECT DISTINCT ON (p2.profissional_id)
+        p2.profissional_id,
+        sc.subcategoria_id,
+        sc.categoria_id
+    FROM profissionais p2
+    JOIN subcategorias sc
+        ON unaccent(lower(COALESCE(p2.profissao, p2.categoria_atuacao, '')))
+           LIKE '%' || unaccent(lower(sc.nome)) || '%'
+    WHERE p2.subcategoria_id IS NULL
+      AND COALESCE(p2.profissao, p2.categoria_atuacao) IS NOT NULL
+    ORDER BY p2.profissional_id, length(sc.nome) DESC
 ) AS melhor
-WHERE p.subcategoria_id IS NULL
-  AND COALESCE(p.profissao, p.categoria_atuacao) IS NOT NULL;
+WHERE p.profissional_id = melhor.profissional_id;
 
 
 -- ============================================================================
