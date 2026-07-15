@@ -97,15 +97,15 @@ String _palavraChaveParaCategoria(String nome) {
   return 'business';
 }
 
-/// Foto real ilustrando uma subcategoria -- fundo dos cartões da lista
-/// horizontal de cada seção (ver `_CartaoSubcategoria`). Usa a palavra-chave
-/// TEMÁTICA da categoria-mãe (subcategorias não têm uma lógica própria de
+/// Foto real ilustrando uma subcategoria -- fundo dos cartões da grade de
+/// cada seção (ver `_CartaoSubcategoria`). Usa a palavra-chave TEMÁTICA da
+/// categoria-mãe (subcategorias não têm uma lógica própria de
 /// correspondência -- "Pedreiro" e "Pintor", por exemplo, cairiam nas
 /// mesmas fotos genéricas de "reparo" de qualquer forma), mas com o
 /// `lock=` calculado a partir da combinação categoria+subcategoria, pra
 /// cada cartão dentro da mesma categoria mostrar uma foto DIFERENTE (ainda
 /// dentro do mesmo tema) -- em vez de repetir a mesma imagem em todos os
-/// cartões da fileira.
+/// cartões da grade.
 ///
 /// PLACEHOLDER DE TERCEIROS -- ATENÇÃO ANTES DE PRODUÇÃO: o backend não
 /// tem (ainda) um campo de imagem por subcategoria (ver `Subcategoria` em
@@ -125,13 +125,22 @@ String _urlImagemParaSubcategoria(String nomeCategoria, String nomeSubcategoria)
   return 'https://loremflickr.com/400/300/$palavraChave?lock=$semente';
 }
 
-/// Dimensões dos cartões de subcategoria na lista horizontal de cada seção
-/// -- largura fixa (todo item de um `ListView` horizontal precisa de uma),
-/// altura calculada pra ficar bem PRÓXIMA de um quadrado (pedido
-/// explícito: "diminua menos verticalmente"), não mais um retângulo bem
-/// mais alto do que largo como a versão anterior em grade.
-const _larguraCartaoSubcategoria = 132.0;
-const _alturaCartaoSubcategoria = 142.0;
+/// Grade de cartões de subcategoria dentro de cada seção -- 4 colunas
+/// (pedido explícito), o que rende 3 linhas para uma categoria com ~12
+/// especialidades (também pedido explícito: "4 horizontais e 3 na
+/// vertical"). Categorias com menos itens têm menos linhas; com mais,
+/// simplesmente mais linhas (a tela inteira já rola verticalmente, então
+/// isso nunca fica "preso" -- ver `Expanded(child: ListView(...))` no
+/// `build`).
+const _colunasGradeSubcategoria = 4;
+
+/// Espaçamento entre os cartões da grade, nos dois eixos.
+const _espacamentoGradeSubcategoria = 12.0;
+
+/// Proporção largura/altura de cada cartão -- próxima de 1 (quase
+/// quadrado, pedido explícito: "diminua menos verticalmente"), não mais um
+/// retângulo bem mais alto do que largo como a versão anterior em grade.
+const _proporcaoCartaoSubcategoria = 0.92;
 
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
@@ -235,13 +244,32 @@ class _MapaScreenState extends State<MapaScreen> {
     try {
       final categorias = await CategoriasService.instancia.listarCategorias();
       if (!mounted) return;
-      setState(() => _categorias = categorias);
+      setState(() => _categorias = _ordenarComOutrosPorUltimo(categorias));
     } on ApiException {
       // Falha silenciosa de propósito: sem a lista, o campo de busca por
       // especialidade e a grade de categorias simplesmente ficam vazios --
       // o mapa em si (que já buscou por localização) continua funcionando
       // normalmente.
     }
+  }
+
+  /// Pedido explícito: a categoria "Outros" (catch-all cadastrado no
+  /// backend -- ver `database/10_backfill_categoria_subcategoria.sql` --
+  /// pra nenhum profissional ficar sem categoria) deve aparecer sempre por
+  /// ÚLTIMO, nunca competindo por atenção com as especialidades "de
+  /// verdade" no topo da tela. Sort ESTÁVEL: só isola "Outros" pro final,
+  /// sem reordenar a posição relativa de nenhuma outra categoria.
+  List<Categoria> _ordenarComOutrosPorUltimo(List<Categoria> categorias) {
+    final normais = <Categoria>[];
+    final outros = <Categoria>[];
+    for (final categoria in categorias) {
+      if (categoria.nome.trim().toLowerCase() == 'outros') {
+        outros.add(categoria);
+      } else {
+        normais.add(categoria);
+      }
+    }
+    return [...normais, ...outros];
   }
 
   Future<void> _atualizarLocalizacaoEBuscar() async {
@@ -353,9 +381,9 @@ class _MapaScreenState extends State<MapaScreen> {
 
   /// Chamado quando a pessoa escolhe (ou remove) uma especialidade -- seja
   /// pelo campo de busca (`BuscaSubcategoriaAutocomplete`) seja por um
-  /// cartão da lista horizontal de especialidades (ver
-  /// `_CartaoSubcategoria`) -- rebusca automaticamente com o novo filtro,
-  /// sem precisar de um botão "aplicar" separado.
+  /// cartão da grade de especialidades (ver `_CartaoSubcategoria`) --
+  /// rebusca automaticamente com o novo filtro, sem precisar de um botão
+  /// "aplicar" separado.
   void _aoMudarSubcategoria(Subcategoria? subcategoria) {
     setState(() => _subcategoriaSelecionada = subcategoria);
     final posicao = context.read<LocalizacaoProvider>().posicao;
@@ -669,7 +697,7 @@ class _MapaScreenState extends State<MapaScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
                   child: Text(
-                    'Arraste para o lado dentro de cada categoria pra ver as especialidades',
+                    'Toque numa especialidade para ver quem atende perto de você',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -681,18 +709,19 @@ class _MapaScreenState extends State<MapaScreen> {
                   )
                 else
                   // Lista de listas: uma seção por categoria (título em
-                  // negrito + fileira horizontal das subcategorias dela),
-                  // empilhadas verticalmente -- rola pra BAIXO entre
-                  // categorias, rola pro LADO dentro de cada uma pra ver
-                  // as especialidades. Construída aqui como um `for` dentro
-                  // do `ListView` (vertical) que já envolve toda esta área
-                  // rolável -- funcionalmente equivalente a um
-                  // `ListView.builder` vertical dedicado (mesmo resultado:
-                  // uma seção por item da lista de categorias), só que sem
-                  // precisar de um SEGUNDO `Scrollable` aninhado dentro do
-                  // primeiro (o que exigiria truques extras de scroll pra
-                  // funcionar direito). A lista horizontal DE VERDADE usa
-                  // `ListView.builder` (ver `_construirSecaoCategoria`).
+                  // negrito + grade das subcategorias dela, 4 colunas --
+                  // pedido explícito), empilhadas verticalmente -- rola pra
+                  // BAIXO entre categorias; dentro de cada categoria, a
+                  // grade cresce em LINHAS (não rola pro lado -- a tela
+                  // inteira já rola verticalmente, ver `Expanded` acima).
+                  // "Outros" (categoria catch-all do backend, ver
+                  // `_ordenarComOutrosPorUltimo`) sempre vem por último,
+                  // depois de todas as especialidades "de verdade".
+                  // Construída aqui como um `for` dentro do `ListView`
+                  // (vertical) que já envolve toda esta área rolável --
+                  // funcionalmente equivalente a um `ListView.builder`
+                  // vertical dedicado, só que sem precisar de um SEGUNDO
+                  // `Scrollable` aninhado dentro do primeiro.
                   for (final categoria in _categorias)
                     _construirSecaoCategoria(context, categoria),
                 const SizedBox(height: 14),
@@ -705,10 +734,14 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 
   /// Uma seção da lista de listas: título em negrito da categoria + uma
-  /// fileira horizontal (`ListView.builder`, `scrollDirection:
-  /// Axis.horizontal`) com um `_CartaoSubcategoria` por especialidade
-  /// dela. Tocar num cartão já filtra o mapa E recentraliza a câmera (ver
-  /// `_aoMudarSubcategoria`) -- sem passo intermediário nenhum.
+  /// GRADE de 4 colunas (`GridView.count`, pedido explícito: "4
+  /// horizontais e 3 na vertical") com um `_CartaoSubcategoria` por
+  /// especialidade dela. `shrinkWrap` + `NeverScrollableScrollPhysics`
+  /// porque quem rola é a tela inteira (o `ListView` vertical que envolve
+  /// todas as seções, ver `build`) -- a grade só ocupa a altura que
+  /// precisa, sem criar um scroll próprio por dentro. Tocar num cartão já
+  /// filtra o mapa E recentraliza a câmera (ver `_aoMudarSubcategoria`) --
+  /// sem passo intermediário nenhum.
   Widget _construirSecaoCategoria(BuildContext context, Categoria categoria) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 22),
@@ -735,24 +768,23 @@ class _MapaScreenState extends State<MapaScreen> {
               ),
             )
           else
-            SizedBox(
-              height: _alturaCartaoSubcategoria,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-                itemCount: categoria.subcategorias.length,
-                itemBuilder: (context, indice) {
-                  final subcategoria = categoria.subcategorias[indice];
-                  final ultimo = indice == categoria.subcategorias.length - 1;
-                  return Padding(
-                    padding: EdgeInsets.only(right: ultimo ? 0 : 12),
-                    child: _CartaoSubcategoria(
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+              child: GridView.count(
+                crossAxisCount: _colunasGradeSubcategoria,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: _espacamentoGradeSubcategoria,
+                crossAxisSpacing: _espacamentoGradeSubcategoria,
+                childAspectRatio: _proporcaoCartaoSubcategoria,
+                children: [
+                  for (final subcategoria in categoria.subcategorias)
+                    _CartaoSubcategoria(
                       categoria: categoria,
                       subcategoria: subcategoria,
                       onTap: () => _aoMudarSubcategoria(subcategoria),
                     ),
-                  );
-                },
+                ],
               ),
             ),
         ],
@@ -1002,20 +1034,20 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 }
 
-/// Um cartão de subcategoria na fileira horizontal "Explore por
-/// especialidade" -- foto real de fundo (ver `_urlImagemParaSubcategoria`;
-/// PLACEHOLDER de terceiros, ver comentário completo lá) com um degradê
-/// escuro por baixo pra manter o texto branco legível em qualquer foto,
-/// clara ou escura. Nome + contagem REAL de profissionais
-/// (`totalProfissionais`, já calculada pelo backend). Tocar já filtra o
-/// mapa por essa especialidade (ver `_aoMudarSubcategoria`).
+/// Um cartão de subcategoria na grade "Explore por especialidade" (4
+/// colunas por categoria) -- foto real de fundo (ver
+/// `_urlImagemParaSubcategoria`; PLACEHOLDER de terceiros, ver comentário
+/// completo lá) com um degradê escuro por baixo pra manter o texto branco
+/// legível em qualquer foto, clara ou escura. Nome + contagem REAL de
+/// profissionais (`totalProfissionais`, já calculada pelo backend). Tocar
+/// já filtra o mapa por essa especialidade (ver `_aoMudarSubcategoria`).
 ///
-/// Largura fixa (`_larguraCartaoSubcategoria`), altura próxima da largura
-/// (quase quadrado, correção explícita do usuário; ver
-/// `_alturaCartaoSubcategoria`). Se a foto falhar ao carregar (sem
-/// internet, serviço fora do ar etc.), cai no MESMO visual de ícone que a
-/// tela usava antes -- nunca mostra um quadrado quebrado/cinza no lugar
-/// dela.
+/// Sem tamanho próprio -- quem define largura/altura é a célula do
+/// `GridView` que o envolve (ver `_construirSecaoCategoria`,
+/// `_proporcaoCartaoSubcategoria` cuida do "quase quadrado", correção
+/// explícita do usuário). Se a foto falhar ao carregar (sem internet,
+/// serviço fora do ar etc.), cai no MESMO visual de ícone que a tela usava
+/// antes -- nunca mostra um quadrado quebrado/cinza no lugar dela.
 class _CartaoSubcategoria extends StatelessWidget {
   final Categoria categoria;
   final Subcategoria subcategoria;
@@ -1029,72 +1061,69 @@ class _CartaoSubcategoria extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: _larguraCartaoSubcategoria,
-      child: Card(
-        margin: EdgeInsets.zero,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          onTap: onTap,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.network(
-                _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, progresso) {
-                  if (progresso == null) return child;
-                  return const ColoredBox(color: AppColors.superficieSecundaria);
-                },
-                errorBuilder: (_, __, ___) => _fundoIconeFallback(),
-              ),
-              // Degradê -- só a metade de baixo escurece, o suficiente pra
-              // nome + contagem (sempre brancos) ficarem legíveis sem
-              // esconder demais a foto.
-              const Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: 64,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Color(0xCC000000)],
-                    ),
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        onTap: onTap,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progresso) {
+                if (progresso == null) return child;
+                return const ColoredBox(color: AppColors.superficieSecundaria);
+              },
+              errorBuilder: (_, __, ___) => _fundoIconeFallback(),
+            ),
+            // Degradê -- só a metade de baixo escurece, o suficiente pra
+            // nome + contagem (sempre brancos) ficarem legíveis sem
+            // esconder demais a foto.
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 56,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Color(0xCC000000)],
                   ),
                 ),
               ),
-              Positioned(
-                left: 10,
-                right: 10,
-                bottom: 10,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      subcategoria.nome,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                        height: 1.2,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+            ),
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    subcategoria.nome,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      height: 1.15,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${subcategoria.totalProfissionais} prof.',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 10),
-                    ),
-                  ],
-                ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${subcategoria.totalProfissionais} prof.',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 9),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
