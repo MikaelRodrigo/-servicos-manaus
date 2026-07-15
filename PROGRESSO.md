@@ -923,3 +923,34 @@ A categoria não é capturada na AVALIAÇÃO (isso duplicaria dado e poderia div
 3. Testar de verdade no Flutter: solicitar um serviço escolhendo uma especialidade específica (profissional com 2+ tags), completar o ciclo até avaliação, confirmar que ela aparece no portfólio já com a categoria certa, e que o filtro "por categoria" do perfil público separa corretamente as avaliações de cada especialidade.
 4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
 5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações.
+
+---
+
+## Sessão de 15/07/2026 (continuação 2) — Painel de desempenho na tela de editar perfil
+
+### Pedido
+Usuário colou uma especificação de negócio pronta ("painel de indicadores"/dashboard): a tela de editar perfil deveria deixar de ser só edição de dados estáticos e mostrar ao profissional um resumo do próprio desempenho (nota média + indicadores de qualidade), calculado no servidor para não sobrecarregar o app. Fechamento: "escolha o melhor caminho na sua visão para realizar essa atualização" — mesma delegação de design da tarefa anterior.
+
+### Decisão de design
+Já existia `buscarResumoDeAvaliacoes` (usada pela rota pública `GET /profissionais/:id/avaliacoes/resumo`) — reaproveitada 100%, só numa rota NOVA e AUTENTICADA (`GET /profissionais/me/avaliacoes/resumo`) que tira o id do token em vez de aceitar um `:id` na URL. Zero SQL novo: a agregação já existia e já tratava "sem avaliação nenhuma" corretamente (COUNT(*) sempre devolve uma linha, médias vêm `null`).
+
+### O que foi feito
+- Backend (`profissionais.routes.ts`): rota `GET /me/avaliacoes/resumo` (`exigirAutenticacao` + `exigirPapel('profissional')`), registrada ANTES de `/:id/avaliacoes/resumo` (mesma pegadinha de ordem de rotas do Express já usada em `/me/subcategorias`).
+- Flutter:
+  - `ProfissionaisService.buscarMinhasAvaliacoesResumo()` — chama a rota nova, devolve `ResumoAvaliacoes` (modelo já existente, reaproveitado).
+  - `editar_perfil_screen.dart`: busca o resumo em paralelo ao carregar a tela (`_carregarResumoDesempenho`, chamado no `initState` ao lado de `_carregarCategorias`), SEM bloquear o resto do formulário se falhar (falha vira um aviso discreto, não impede editar descrição/CEP/tags). Novo `Card` (`_PainelDesempenho`) logo abaixo da foto: nota média com estrela + indicadores de "Resolução de Problema"/"Comportamental"/"Custo benefício" (`_IndicadorDesempenho`) dentro de um `Wrap` — quebra em várias linhas em tela estreita (celular), fica lado a lado em tela larga (Web/desktop), sem `LayoutBuilder` nem lógica condicional por plataforma. Três estados no mesmo `Card`: carregando (spinner), erro (aviso discreto) e vazio (mensagem neutra "ainda sem avaliações").
+
+### Verificação feita
+- `npx tsc --noEmit` no backend: limpo.
+- Balanceamento de `(`/`{`/`[`/`}`/`)`/`]` via script Python nos 2 arquivos Dart tocados: batendo.
+- `tail -c` + checagem de bytes nulos nos 3 arquivos tocados: sem truncamento desta vez (as contagens de linha bateram com o esperado logo na primeira tentativa).
+- `git diff --stat` revisado: só as 281 linhas adicionadas esperadas, nenhuma deleção.
+- Commit `5ab1435` criado com sucesso.
+- **Não testado nesta sessão**: fluxo real (abrir a tela de editar perfil como profissional com e sem avaliações, conferir que o painel aparece certo nos dois casos, e que os números mudam depois de uma nova avaliação).
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` para enviar todos os commits pendentes (agora incluindo `5ab1435`).
+2. Rodar as migrações 11 e 12 no Neon (ainda não confirmado que rodaram).
+3. Testar o painel de desempenho de verdade: profissional sem avaliação nenhuma (deve mostrar o estado neutro), profissional com avaliações (números batendo com o que está no banco), e o cenário de erro de rede (desligar o backend e confirmar que só o painel falha, o resto da tela continua editável).
+4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações; testar o fluxo completo de solicitar serviço com especialidade (pendência da sessão anterior).
