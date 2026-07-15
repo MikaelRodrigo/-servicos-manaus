@@ -84,6 +84,15 @@ class ProfissionaisService {
     return ResumoAvaliacoes.fromJson(resposta as Map<String, dynamic>);
   }
 
+  /// GET /profissionais/me/avaliacoes/resumo -- mesma agregação acima, mas
+  /// SEMPRE sobre o profissional LOGADO (o id vem do token, nunca é
+  /// passado por quem chama). Alimenta o painel de desempenho ("dashboard")
+  /// da tela de editar perfil.
+  Future<ResumoAvaliacoes> buscarMinhasAvaliacoesResumo() async {
+    final resposta = await _api.get('/profissionais/me/avaliacoes/resumo');
+    return ResumoAvaliacoes.fromJson(resposta as Map<String, dynamic>);
+  }
+
   /// GET /profissionais/:id/portfolio -- histórico de serviços concluídos e
   /// avaliados, com fotos e comentário de cada cliente. Suporta paginação
   /// simples (o app carrega a primeira página; "carregar mais" fica para

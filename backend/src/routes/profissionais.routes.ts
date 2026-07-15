@@ -358,6 +358,41 @@ profissionaisRouter.delete(
 );
 
 /* ============================================================================
+   GET /profissionais/me/avaliacoes/resumo -- PRIVADA (exige login, só "profissional").
+
+   Painel de desempenho ("dashboard") da tela de editar perfil: a MESMA
+   agregação de `GET /profissionais/:id/avaliacoes/resumo` (pública), só que
+   o `:id` nunca vem da URL nem do corpo da requisição -- é sempre
+   `req.usuario.sub`, o dono do token. Rota separada, e não
+   "reaproveitar a pública passando o próprio id", por dois motivos: (1) o
+   profissional não precisa saber o próprio UUID para ver o painel dele, e
+   (2) fica registrado no código, de forma explícita, que "minhas métricas"
+   é sempre sobre QUEM ESTÁ LOGADO -- nunca um id manipulável.
+
+   Precisa ficar registrada ANTES de `/:id/avaliacoes/resumo` abaixo --
+   mesma pegadinha de ordem de rotas do Express já documentada em
+   `/me/subcategorias`: se viesse depois, "/me" seria capturado pelo `:id`.
+
+   `buscarResumoDeAvaliacoes` já devolve tudo `null` (nunca lança erro)
+   quando o profissional ainda não tem avaliação nenhuma -- COUNT(*) sempre
+   devolve uma linha, com os AVG em branco. O app mostra isso como "ainda
+   sem avaliações", não como falha.
+   ========================================================================= */
+profissionaisRouter.get(
+  '/me/avaliacoes/resumo',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const resumo = await buscarResumoDeAvaliacoes(req.usuario!.sub);
+      return res.json(resumo);
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
    GET /profissionais/:id -- PÚBLICA (sem login).
 
    Perfil público completo: foto, descrição, atuação, endereço de atuação.

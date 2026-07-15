@@ -66,6 +66,16 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   bool _carregandoCategorias = true;
   List<TagSubcategoria> _tags = [];
 
+  // Painel de desempenho ("dashboard") -- resumo das próprias avaliações
+  // (nota média + indicadores por critério), buscado à parte do perfil
+  // (GET /profissionais/me/avaliacoes/resumo, autenticado). Separado de
+  // `_futuroPerfilAtual` de propósito: se a busca de avaliações falhar, o
+  // resto da tela (editar descrição/CEP/tags) continua funcionando
+  // normalmente -- é um painel informativo, não um bloqueio de fluxo.
+  ResumoAvaliacoes? _resumoDesempenho;
+  bool _carregandoResumo = true;
+  bool _erroResumo = false;
+
   @override
   void initState() {
     super.initState();
@@ -81,6 +91,29 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
       });
     });
     _carregarCategorias();
+    _carregarResumoDesempenho();
+  }
+
+  /// Busca o resumo de avaliações do profissional logado, para o painel de
+  /// desempenho no topo da tela. Falha silenciosa de propósito (sem
+  /// `SnackBar`): é um painel "a mais", não pode travar nem incomodar quem
+  /// só veio editar a descrição -- `_erroResumo` deixa a UI mostrar um
+  /// aviso discreto no lugar do painel, sem impedir o resto da tela.
+  Future<void> _carregarResumoDesempenho() async {
+    try {
+      final resumo = await ProfissionaisService.instancia.buscarMinhasAvaliacoesResumo();
+      if (!mounted) return;
+      setState(() {
+        _resumoDesempenho = resumo;
+        _carregandoResumo = false;
+      });
+    } on ApiException {
+      if (!mounted) return;
+      setState(() {
+        _erroResumo = true;
+        _carregandoResumo = false;
+      });
+    }
   }
 
   Future<void> _carregarCategorias() async {
@@ -261,6 +294,18 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
               ),
               const SizedBox(height: 20),
 
+              // Painel de desempenho ("dashboard") -- fechamento estatístico
+              // das avaliações já recebidas, todo calculado NO SERVIDOR
+              // (GET /profissionais/me/avaliacoes/resumo): o app só exibe o
+              // resultado pronto (nota média + 3 indicadores), nunca soma
+              // ou processa avaliação nenhuma no dispositivo.
+              _PainelDesempenho(
+                resumo: _resumoDesempenho,
+                carregando: _carregandoResumo,
+                erro: _erroResumo,
+              ),
+              const SizedBox(height: 20),
+
               TextField(
                 controller: _descricaoController,
                 maxLines: 5,
@@ -387,6 +432,198 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Painel de desempenho ("dashboard") -- fechamento estatístico das
+/// avaliações do profissional: nota média + indicadores de qualidade
+/// (resolução de problema, comportamento, custo-benefício). Todo o CÁLCULO
+/// vem pronto do servidor (`GET /profissionais/me/avaliacoes/resumo`); este
+/// widget só decide COMO desenhar, nunca soma nem processa avaliação
+/// nenhuma -- é puramente de exibição.
+///
+/// Três estados possíveis, sempre dentro do mesmo `Card` (a transição entre
+/// eles não muda a posição do painel na tela):
+///   1. `carregando` -- spinner pequeno + texto.
+///   2. `erro` -- aviso discreto (a tela continua editável mesmo assim).
+///   3. dados prontos -- se `resumo.totalAvaliacoes == 0`, mensagem neutra
+///      de "ainda sem avaliações"; senão, nota média + os 3 indicadores.
+class _PainelDesempenho extends StatelessWidget {
+  final ResumoAvaliacoes? resumo;
+  final bool carregando;
+  final bool erro;
+
+  const _PainelDesempenho({
+    required this.resumo,
+    required this.carregando,
+    required this.erro,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: _conteudo(context),
+      ),
+    );
+  }
+
+  Widget _conteudo(BuildContext context) {
+    if (carregando) {
+      return Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Text('Carregando seu desempenho...', style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      );
+    }
+
+    if (erro) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 20, color: Colors.grey.shade600),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Não foi possível carregar seu desempenho agora. Isso não afeta o resto do seu perfil.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final dados = resumo;
+    if (dados == null || dados.totalAvaliacoes == 0) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.insights_outlined, size: 20, color: Colors.grey.shade600),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Você ainda não tem avaliações. Assim que concluir seu primeiro serviço avaliado, seu desempenho aparece aqui.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.dashboard_outlined, size: 18, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 8),
+            Text('Seu desempenho', style: Theme.of(context).textTheme.titleSmall),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            const Icon(Icons.star, color: Colors.amber, size: 28),
+            const SizedBox(width: 8),
+            Text(
+              dados.mediaGeral != null ? dados.mediaGeral!.toStringAsFixed(1) : '--',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                'nota média · ${dados.totalAvaliacoes} avaliação(ões)',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // `Wrap` (não `Row`) de propósito: numa tela estreita (celular) os
+        // três indicadores quebram em mais de uma linha; numa janela larga
+        // (Flutter Web/desktop) eles ficam lado a lado -- o mesmo painel se
+        // adapta aos dois sem precisar de layout condicional por plataforma.
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _IndicadorDesempenho(
+              icone: Icons.build_outlined,
+              rotulo: 'Resolução de Problema',
+              valor: dados.mediaTecnico,
+            ),
+            _IndicadorDesempenho(
+              icone: Icons.emoji_people_outlined,
+              rotulo: 'Comportamental',
+              valor: dados.mediaComportamental,
+            ),
+            _IndicadorDesempenho(
+              icone: Icons.payments_outlined,
+              rotulo: 'Custo benefício',
+              valor: dados.mediaEconomico,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Um indicador de qualidade dentro do painel de desempenho -- ícone +
+/// rótulo + valor, dentro de um "chip" com borda sutil. `valor == null`
+/// (critério sem avaliação suficiente, caso raríssimo já que os três
+/// critérios são preenchidos juntos em toda avaliação) mostra "--" em vez
+/// de quebrar a tela.
+class _IndicadorDesempenho extends StatelessWidget {
+  final IconData icone;
+  final String rotulo;
+  final double? valor;
+
+  const _IndicadorDesempenho({
+    required this.icone,
+    required this.rotulo,
+    required this.valor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: 18, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                valor != null ? valor!.toStringAsFixed(1) : '--',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                rotulo,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
