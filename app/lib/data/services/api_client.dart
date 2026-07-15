@@ -98,6 +98,17 @@ class ApiClient {
     return _tratarResposta(resposta);
   }
 
+  /// DELETE -- usado hoje só para remover uma tag de especialidade
+  /// (DELETE /profissionais/me/subcategorias/:subcategoriaId). Sem corpo:
+  /// o que remover já está no próprio caminho da URL.
+  Future<dynamic> delete(String caminho, {bool comAutenticacao = true}) async {
+    final resposta = await http.delete(
+      _uri(caminho),
+      headers: await _cabecalhos(comAutenticacao: comAutenticacao),
+    );
+    return _tratarResposta(resposta);
+  }
+
   /// POST ou PATCH multipart/form-data -- usado em toda tela que manda
   /// arquivo (avaliação com fotos, edição de perfil com foto). Campos de
   /// texto vão em `campos`; cada item de `arquivos` é anexado com o MESMO

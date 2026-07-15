@@ -1,3 +1,5 @@
+import 'categoria.dart' show TagSubcategoria;
+
 /// Espelha GET /profissionais/:id (ver `buscarPerfilPublico` no backend).
 ///
 /// É o "cartão de visitas" completo do profissional -- o que aparece quando
@@ -20,6 +22,11 @@ class PerfilProfissional {
   final double? latitude;
   final double? longitude;
   final String? enderecoAtuacao;
+  // TODAS as tags de especialidade do profissional (migração 11 no backend)
+  // -- diferente de `atuacao`/`categoria` acima, que continuam sendo só a
+  // escolha ÚNICA feita no cadastro. É o que alimenta os "boxes" na tela de
+  // editar perfil e os chips no perfil público -- ver TagSubcategoria.
+  final List<TagSubcategoria> subcategorias;
 
   const PerfilProfissional({
     required this.id,
@@ -32,9 +39,11 @@ class PerfilProfissional {
     required this.latitude,
     required this.longitude,
     required this.enderecoAtuacao,
+    this.subcategorias = const [],
   });
 
   factory PerfilProfissional.fromJson(Map<String, dynamic> json) {
+    final listaTags = json['subcategorias'] as List<dynamic>? ?? const [];
     return PerfilProfissional(
       id: json['profissional_id'] as String,
       tipoPessoa: json['tipo_pessoa'] as String,
@@ -46,6 +55,9 @@ class PerfilProfissional {
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       enderecoAtuacao: json['endereco_atuacao'] as String?,
+      subcategorias: listaTags
+          .map((item) => TagSubcategoria.fromJson(item as Map<String, dynamic>))
+          .toList(),
     );
   }
 }

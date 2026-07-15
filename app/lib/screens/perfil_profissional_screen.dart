@@ -183,7 +183,28 @@ class _ConteudoPerfil extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ),
-        if (perfil.atuacao != null) ...[
+        // TODAS as especialidades (migração 11 no backend) -- um chip por
+        // tag, centralizados. Fallback pro texto único antigo (`atuacao`)
+        // só no caso raro de o array vir vazio (ex.: perfil de antes desta
+        // migração que, por algum motivo, ainda não tem nenhuma tag).
+        if (perfil.subcategorias.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final tag in perfil.subcategorias)
+                  Chip(
+                    label: Text(tag.nome),
+                    avatar: const Icon(Icons.category_outlined, size: 16),
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
+          ),
+        ] else if (perfil.atuacao != null) ...[
           const SizedBox(height: 4),
           Center(
             child: Text(

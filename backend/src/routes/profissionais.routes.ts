@@ -1,11 +1,19 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { env } from '../env';
-import { buscarProximos, buscarPerfilPublico, atualizarPerfilProfissional } from '../repositories/profissionais.repository';
+import {
+  buscarProximos,
+  buscarPerfilPublico,
+  atualizarPerfilProfissional,
+  listarTagsDoProfissional,
+  adicionarTagAoProfissional,
+  removerTagDoProfissional,
+} from '../repositories/profissionais.repository';
 import {
   numeroObrigatorio,
   numeroOpcional,
   textoOpcional,
   inteiroPositivoOpcional,
+  inteiroPositivoObrigatorio,
   apenasDigitos,
   entre,
   uuidObrigatorio,
@@ -266,6 +274,84 @@ profissionaisRouter.patch(
           new ErroDeValidacao('Categoria/subcategoria inválida. Selecione novamente na lista.'),
         );
       }
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
+   GET /profissionais/me/subcategorias -- PRIVADA (exige login, só "profissional").
+
+   Lista TODAS as tags de especialidade do profissional logado -- migração
+   11. É o que a tela de editar perfil usa para desenhar os "boxes"
+   removíveis antes mesmo de qualquer alteração.
+   ========================================================================= */
+profissionaisRouter.get(
+  '/me/subcategorias',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const tags = await listarTagsDoProfissional(req.usuario!.sub);
+      return res.json({ dados: tags });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
+   POST /profissionais/me/subcategorias -- PRIVADA (exige login, só "profissional").
+
+   Body: { subcategoria_id: number }
+
+   Adiciona UMA tag de especialidade nova -- idempotente (adicionar de novo
+   uma que já existe não dá erro, só devolve a lista sem mudança). É o que
+   roda a cada "Enter"/confirmação no fluxo de 'Adicionar Categoria' da tela
+   de editar perfil: o profissional digita, confirma, o box aparece -- e o
+   campo continua ali, pronto pra próxima.
+   ========================================================================= */
+profissionaisRouter.post(
+  '/me/subcategorias',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const subcategoriaId = inteiroPositivoObrigatorio(req.body.subcategoria_id, 'subcategoria_id');
+      const tags = await adicionarTagAoProfissional(req.usuario!.sub, subcategoriaId);
+      return res.status(201).json({ dados: tags });
+    } catch (erro) {
+      // `subcategoria_id` não existe -- a FK de `profissional_subcategorias`
+      // recusa o INSERT. Mesma tradução já usada em PATCH /profissionais/me.
+      if (ehErroDePostgres(erro) && erro.code === PG_FOREIGN_KEY_VIOLATION) {
+        return next(new ErroDeValidacao('Especialidade inválida. Selecione novamente na lista.'));
+      }
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
+   DELETE /profissionais/me/subcategorias/:subcategoriaId -- PRIVADA (exige
+   login, só "profissional").
+
+   Remove UMA tag de especialidade -- recusa (400) se for a última que
+   sobrou (ver `removerTagDoProfissional`): um profissional precisa manter
+   ao menos uma, senão desapareceria de toda busca por subcategoria exata.
+   ========================================================================= */
+profissionaisRouter.delete(
+  '/me/subcategorias/:subcategoriaId',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const subcategoriaId = numeroObrigatorio(req.params.subcategoriaId, 'subcategoria_id');
+      if (!Number.isInteger(subcategoriaId) || subcategoriaId <= 0) {
+        throw new ErroDeValidacao('"subcategoria_id" deve ser um número inteiro positivo.');
+      }
+      const tags = await removerTagDoProfissional(req.usuario!.sub, subcategoriaId);
+      return res.json({ dados: tags });
+    } catch (erro) {
       return next(erro);
     }
   },

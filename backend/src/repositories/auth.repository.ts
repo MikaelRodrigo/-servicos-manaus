@@ -148,13 +148,29 @@ export interface DadosProfissionalPJ {
   longitude?: number;
 }
 
+/**
+ * As duas funções abaixo (`criarProfissionalPF`/`PJ`) inserem em DUAS
+ * tabelas numa query só, via `WITH`: a linha em `profissionais` E a
+ * primeira linha em `profissional_subcategorias` (migração 11 -- tabela de
+ * tags N:N). É o que garante que a categoria/subcategoria escolhida no
+ * cadastro (`categoriaId`/`subcategoriaId`, ainda obrigatórios aqui) vire
+ * automaticamente a PRIMEIRA tag do profissional, sem precisar de duas
+ * chamadas separadas nem de uma transação explícita (`BEGIN`/`COMMIT`) --
+ * um `WITH` encadeado já roda como UMA operação atômica no Postgres: ou as
+ * duas linhas são gravadas, ou nenhuma é.
+ */
 export async function criarProfissionalPF(
   dados: DadosProfissionalPF,
 ): Promise<{ id: string }> {
   const { rows } = await pool.query<{ profissional_id: string }>(
-    `INSERT INTO profissionais
-       (tipo_pessoa, email, senha_hash, contato, nome, cpf, data_nascimento, categoria_id, subcategoria_id, latitude, longitude)
-     VALUES ('PF', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `WITH novo AS (
+       INSERT INTO profissionais
+         (tipo_pessoa, email, senha_hash, contato, nome, cpf, data_nascimento, categoria_id, subcategoria_id, latitude, longitude)
+       VALUES ('PF', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING profissional_id, subcategoria_id
+     )
+     INSERT INTO profissional_subcategorias (profissional_id, subcategoria_id)
+     SELECT profissional_id, subcategoria_id FROM novo
      RETURNING profissional_id`,
     [
       dados.email,
@@ -176,9 +192,14 @@ export async function criarProfissionalPJ(
   dados: DadosProfissionalPJ,
 ): Promise<{ id: string }> {
   const { rows } = await pool.query<{ profissional_id: string }>(
-    `INSERT INTO profissionais
-       (tipo_pessoa, email, senha_hash, contato, razao_social, cnpj, categoria_id, subcategoria_id, data_criacao, latitude, longitude)
-     VALUES ('PJ', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `WITH novo AS (
+       INSERT INTO profissionais
+         (tipo_pessoa, email, senha_hash, contato, razao_social, cnpj, categoria_id, subcategoria_id, data_criacao, latitude, longitude)
+       VALUES ('PJ', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING profissional_id, subcategoria_id
+     )
+     INSERT INTO profissional_subcategorias (profissional_id, subcategoria_id)
+     SELECT profissional_id, subcategoria_id FROM novo
      RETURNING profissional_id`,
     [
       dados.email,

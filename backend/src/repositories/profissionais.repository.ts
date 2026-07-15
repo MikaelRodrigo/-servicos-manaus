@@ -1,4 +1,5 @@
 import { pool } from '../database';
+import { ErroDeValidacao } from '../utils/validacao';
 
 /* ============================================================================
    Camada de acesso a dados.
@@ -7,6 +8,58 @@ import { pool } from '../database';
    Quando na Etapa 4 você trocar `pg` cru por algo com cache, ou adicionar
    um teste automatizado, você mexe só neste arquivo.
    ========================================================================= */
+
+/**
+ * Uma TAG de especialidade de um profissional (migração 11 -- tabela
+ * `profissional_subcategorias`, N:N). Diferente de `atuacao`/`categoria`
+ * (que continuam existindo como a escolha ÚNICA feita no cadastro), esta
+ * lista é TODAS as subcategorias do profissional -- a primeira delas é
+ * sempre a escolha do cadastro (backfill da migração 11 + `WITH` novo em
+ * `criarProfissionalPF`/`PJ`), e as demais são adicionadas depois, na tela
+ * de editar perfil (`POST /profissionais/me/subcategorias`).
+ */
+export interface TagSubcategoria {
+  id: number;
+  nome: string;
+  categoriaId: number;
+  categoriaNome: string;
+}
+
+/**
+ * Fragmento SQL reaproveitado nas três queries abaixo que devolvem o perfil
+ * de um profissional (`buscarProximos`, `buscarPerfilPublico`,
+ * `atualizarPerfilProfissional`): agrega TODAS as tags de especialidade dele
+ * num array JSON, numa `LATERAL` só -- sem N+1 (mesmo espírito da subquery
+ * de médias de avaliação logo abaixo). As três queries usam `p` como alias
+ * da linha de `profissionais` (a última via `FROM atualizado p`), então o
+ * mesmo fragmento funciona sem alteração nas três.
+ *
+ * É uma STRING FIXA, sem nenhum valor de usuário interpolado -- não é o
+ * "nunca use crase para montar SQL" que o comentário mais abaixo alerta
+ * (aquele é sobre VALORES vindos de fora); aqui é só reaproveitar um pedaço
+ * de SQL constante entre três queries, para não repetir o mesmo `LATERAL`
+ * três vezes e correr o risco de uma cópia divergir da outra com o tempo.
+ */
+const SQL_TAGS_SUBCATEGORIAS = `
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', sc2.subcategoria_id,
+                   'nome', sc2.nome,
+                   'categoriaId', c2.categoria_id,
+                   'categoriaNome', c2.nome
+                 )
+                 ORDER BY c2.nome, sc2.nome
+               ),
+               '[]'::json
+             ) AS lista
+      FROM profissional_subcategorias ps
+      JOIN subcategorias sc2 ON sc2.subcategoria_id = ps.subcategoria_id
+      JOIN categorias c2 ON c2.categoria_id = sc2.categoria_id
+      WHERE ps.profissional_id = p.profissional_id
+    ) tags_agg ON true
+`;
 
 /** O que a rota entrega para cá. Já validado, já em tipos corretos. */
 export interface FiltroProximidade {
@@ -64,6 +117,8 @@ export interface ProfissionalProximo {
   media_custo_beneficio: number | null;
   /** Média geral (dos três critérios juntos). Mesma regra de `null` acima. */
   media_geral: number | null;
+  /** TODAS as tags de especialidade do profissional (migração 11) -- ver `TagSubcategoria`. */
+  subcategorias: TagSubcategoria[];
 }
 
 /**
@@ -140,11 +195,15 @@ export async function buscarProximos(
       , 2)::float8                          AS distancia_metros,
 
       av.media_custo_beneficio,
-      av.media_geral
+      av.media_geral,
+
+      -- TODAS as tags de especialidade (migração 11) -- ver SQL_TAGS_SUBCATEGORIAS.
+      tags_agg.lista AS subcategorias
 
     FROM profissionais p
     LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+    ${SQL_TAGS_SUBCATEGORIAS}
 
     -- Médias de avaliação pré-agregadas por profissional, numa subquery só
     -- (GROUP BY), e então JUNTADAS aqui -- não uma subquery/AVG por LINHA
@@ -208,15 +267,22 @@ export async function buscarProximos(
       )
 
       -- Filtro EXATO por subcategoria (o que o mapa usa de verdade hoje).
-      -- Sem aproximação: só entra quem tem exatamente essa subcategoria_id.
-      --
-      -- Pode ser um match simples porque TODO profissional tem
-      -- categoria_id/subcategoria_id preenchidos -- quem se cadastrou antes
-      -- da migração 09 recebeu um valor via a migração 10 (backfill
-      -- automático por nome + categoria "Outros" como rede de segurança
-      -- final). Ver database/10_backfill_categoria_subcategoria.sql -- ali
-      -- é o lugar certo para essa correção, não aqui na busca.
-      AND ($7::int IS NULL OR p.subcategoria_id = $7::int)
+      -- Sem aproximação: só entra quem tem exatamente essa subcategoria_id
+      -- ENTRE AS TAGS DELE (migração 11) -- não só na categoria/subcategoria
+      -- única do cadastro. É o que faz um profissional aparecer na busca de
+      -- QUALQUER especialidade que ele tenha adicionado depois, não só a
+      -- primeira. Antes da migração 11 este filtro comparava direto contra
+      -- p.subcategoria_id; TODO profissional continua tendo ao menos uma
+      -- tag (a do cadastro vira a primeira automaticamente -- ver migração
+      -- 11, Seção 3, e o backfill por nome da migração 10 antes dela).
+      AND (
+        $7::int IS NULL
+        OR EXISTS (
+          SELECT 1 FROM profissional_subcategorias ps_filtro
+          WHERE ps_filtro.profissional_id = p.profissional_id
+            AND ps_filtro.subcategoria_id = $7::int
+        )
+      )
 
     ORDER BY ${ORDENS_VALIDAS[filtro.ordenarPor ?? 'distancia']}
     LIMIT $5
@@ -263,6 +329,8 @@ export interface PerfilPublicoProfissional {
   latitude: number | null;
   longitude: number | null;
   endereco_atuacao: string | null;
+  /** TODAS as tags de especialidade do profissional (migração 11) -- ver `TagSubcategoria`. */
+  subcategorias: TagSubcategoria[];
 }
 
 /**
@@ -282,10 +350,12 @@ export async function buscarPerfilPublico(
        p.url_foto_perfil,
        p.latitude,
        p.longitude,
-       p.endereco_atuacao
+       p.endereco_atuacao,
+       tags_agg.lista                   AS subcategorias
      FROM profissionais p
      LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
      LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+     ${SQL_TAGS_SUBCATEGORIAS}
      WHERE p.profissional_id = $1`,
     [profissionalId],
   );
@@ -358,10 +428,12 @@ export async function atualizarPerfilProfissional(
        p.url_foto_perfil,
        p.latitude,
        p.longitude,
-       p.endereco_atuacao
+       p.endereco_atuacao,
+       tags_agg.lista                   AS subcategorias
      FROM atualizado p
      LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
-     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id`,
+     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+     ${SQL_TAGS_SUBCATEGORIAS}`,
     [
       profissionalId,
       dados.descricao ?? null,
@@ -375,4 +447,100 @@ export async function atualizarPerfilProfissional(
     ],
   );
   return rows[0];
+}
+
+/* ============================================================================
+   GESTÃO DE TAGS DE ESPECIALIDADE (migração 11)
+
+   Três funções pequenas, para as três operações que a tela de editar perfil
+   precisa: listar, adicionar, remover. Todas devolvem a lista ATUALIZADA de
+   tags (não só "ok"/void) -- o Flutter atualiza os chips na tela direto da
+   resposta, sem precisar buscar o perfil inteiro de novo.
+   ========================================================================= */
+
+/** Linha crua do SELECT abaixo, antes de virar `TagSubcategoria` (camelCase). */
+interface LinhaTagSubcategoria {
+  subcategoria_id: number;
+  nome: string;
+  categoria_id: number;
+  categoria_nome: string;
+}
+
+/**
+ * Lista as tags de especialidade de UM profissional, ordenadas por
+ * categoria e depois nome -- mesma ordenação usada dentro do array
+ * `subcategorias` de `buscarProximos`/`buscarPerfilPublico` acima (via
+ * `SQL_TAGS_SUBCATEGORIAS`), só que como função própria: as rotas de
+ * gerenciar tags não precisam do resto do perfil junto.
+ */
+export async function listarTagsDoProfissional(profissionalId: string): Promise<TagSubcategoria[]> {
+  const { rows } = await pool.query<LinhaTagSubcategoria>(
+    `SELECT sc.subcategoria_id, sc.nome, c.categoria_id, c.nome AS categoria_nome
+       FROM profissional_subcategorias ps
+       JOIN subcategorias sc ON sc.subcategoria_id = ps.subcategoria_id
+       JOIN categorias c ON c.categoria_id = sc.categoria_id
+      WHERE ps.profissional_id = $1
+      ORDER BY c.nome, sc.nome`,
+    [profissionalId],
+  );
+  return rows.map((linha) => ({
+    id: linha.subcategoria_id,
+    nome: linha.nome,
+    categoriaId: linha.categoria_id,
+    categoriaNome: linha.categoria_nome,
+  }));
+}
+
+/**
+ * Adiciona UMA tag de especialidade nova ao profissional.
+ *
+ * `ON CONFLICT DO NOTHING`: adicionar uma tag que ele JÁ TEM não é erro, só
+ * não faz nada -- idempotente, mesmo espírito do `ON CONFLICT DO NOTHING` já
+ * usado no seed de categorias/subcategorias (migração 09). Um
+ * `subcategoriaId` que não existe estoura a FK
+ * (`profissional_subcategorias_subcategoria_id_fkey`) -- a rota traduz isso
+ * para 400, mesmo padrão já usado em `PATCH /profissionais/me`.
+ */
+export async function adicionarTagAoProfissional(
+  profissionalId: string,
+  subcategoriaId: number,
+): Promise<TagSubcategoria[]> {
+  await pool.query(
+    `INSERT INTO profissional_subcategorias (profissional_id, subcategoria_id)
+     VALUES ($1, $2)
+     ON CONFLICT (profissional_id, subcategoria_id) DO NOTHING`,
+    [profissionalId, subcategoriaId],
+  );
+  return listarTagsDoProfissional(profissionalId);
+}
+
+/**
+ * Remove UMA tag de especialidade do profissional -- SEMPRE mantendo ao
+ * menos uma. Um profissional sem tag nenhuma nunca apareceria em busca
+ * nenhuma (nem por proximidade sem filtro, que já lista todo mundo com
+ * localização, nem por subcategoria exata) -- por isso conta quantas tags
+ * existem ANTES de apagar: se só sobrar uma, recusa com uma mensagem clara
+ * em vez de deixar o profissional "sumir" silenciosamente das buscas.
+ */
+export async function removerTagDoProfissional(
+  profissionalId: string,
+  subcategoriaId: number,
+): Promise<TagSubcategoria[]> {
+  const { rows } = await pool.query<{ total: string }>(
+    `SELECT COUNT(*)::text AS total FROM profissional_subcategorias WHERE profissional_id = $1`,
+    [profissionalId],
+  );
+  const total = Number(rows[0]?.total ?? '0');
+
+  if (total <= 1) {
+    throw new ErroDeValidacao(
+      'Você precisa manter ao menos uma especialidade. Adicione outra antes de remover esta.',
+    );
+  }
+
+  await pool.query(
+    `DELETE FROM profissional_subcategorias WHERE profissional_id = $1 AND subcategoria_id = $2`,
+    [profissionalId, subcategoriaId],
+  );
+  return listarTagsDoProfissional(profissionalId);
 }

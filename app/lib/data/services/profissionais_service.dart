@@ -1,4 +1,5 @@
 import 'package:image_picker/image_picker.dart';
+import '../models/categoria.dart' show TagSubcategoria;
 import '../models/perfil_profissional.dart';
 import '../models/profissional.dart';
 import 'api_client.dart';
@@ -156,5 +157,34 @@ class ProfissionaisService {
       nomeArquivo: foto?.name,
     );
     return PerfilProfissional.fromJson(resposta as Map<String, dynamic>);
+  }
+
+  /// POST /profissionais/me/subcategorias -- adiciona UMA tag de
+  /// especialidade nova ao profissional logado (migração 11 no backend).
+  /// Idempotente: adicionar uma que já existe não dá erro. Devolve a lista
+  /// ATUALIZADA de tags -- é o que a tela usa para redesenhar os "boxes"
+  /// sem precisar buscar o perfil inteiro de novo.
+  Future<List<TagSubcategoria>> adicionarTag(int subcategoriaId) async {
+    final resposta = await _api.post(
+      '/profissionais/me/subcategorias',
+      corpo: {'subcategoria_id': subcategoriaId},
+    ) as Map<String, dynamic>;
+    final dados = resposta['dados'] as List<dynamic>;
+    return dados
+        .map((item) => TagSubcategoria.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// DELETE /profissionais/me/subcategorias/:subcategoriaId -- remove UMA
+  /// tag. O backend recusa (400 -- vira [ApiException]) se for a última que
+  /// sobrou: um profissional precisa manter ao menos uma especialidade.
+  Future<List<TagSubcategoria>> removerTag(int subcategoriaId) async {
+    final resposta = await _api.delete(
+      '/profissionais/me/subcategorias/$subcategoriaId',
+    ) as Map<String, dynamic>;
+    final dados = resposta['dados'] as List<dynamic>;
+    return dados
+        .map((item) => TagSubcategoria.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 }

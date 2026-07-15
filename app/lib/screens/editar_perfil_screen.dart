@@ -14,7 +14,7 @@ import '../data/services/cep_service.dart';
 import '../data/services/profissionais_service.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/selecao_foto_perfil.dart';
-import '../widgets/seletor_categoria_cascata.dart';
+import '../widgets/selecao_tags_subcategorias.dart';
 
 /// Tela em que o PRÓPRIO profissional edita seu perfil público: foto,
 /// descrição ("sobre mim") e CEP. É o que alimenta os campos que antes
@@ -55,16 +55,16 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   bool _consultandoCep = false;
   String? _erroCep;
 
-  // Categoria/subcategoria -- mesmo espírito do CEP acima: o seletor começa
-  // sempre VAZIO (nunca pré-selecionado com a categoria atual), e o valor
-  // atual só aparece como texto informativo ao lado. Só troca de verdade
-  // quando a pessoa escolhe os dois níveis de novo -- ver `_salvar`.
+  // Especialidades (tags de subcategoria, migração 11 no backend) -- lista
+  // fixa (`_categorias`) alimenta a busca do `SelecaoTagsSubcategorias`;
+  // `_tags` são as especialidades que o profissional JÁ TEM agora.
+  // Diferente do CEP/descrição acima, tags não fazem parte do "Salvar
+  // perfil" em lote -- cada adição/remoção chama a API na hora (ver
+  // `_adicionarTag`/`_removerTag`), então o estado aqui já reflete sempre o
+  // que está gravado no banco.
   List<Categoria> _categorias = [];
   bool _carregandoCategorias = true;
-  Categoria? _categoriaSelecionada;
-  Subcategoria? _subcategoriaSelecionada;
-  String? _erroCategoria;
-  String? _categoriaAtualExibicao;
+  List<TagSubcategoria> _tags = [];
 
   @override
   void initState() {
@@ -77,9 +77,7 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
         _descricaoController.text = perfil.descricao ?? '';
         _urlFotoAtual = perfil.urlFotoPerfil;
         _enderecoAtualExibicao = perfil.enderecoAtuacao;
-        _categoriaAtualExibicao = perfil.atuacao != null
-            ? (perfil.categoria != null ? '${perfil.atuacao} (em: ${perfil.categoria})' : perfil.atuacao)
-            : null;
+        _tags = perfil.subcategorias;
       });
     });
     _carregarCategorias();
@@ -100,6 +98,25 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
         SnackBar(content: Text('Não foi possível carregar as categorias: ${erro.mensagem}')),
       );
     }
+  }
+
+  /// Chamado pelo `SelecaoTagsSubcategorias` quando o profissional confirma
+  /// uma especialidade nova (Enter ou toque no dropdown). Deixa
+  /// `ApiException` escapar de propósito -- é o próprio widget quem mostra
+  /// o `SnackBar` de erro (ver `_confirmarAdicao` lá).
+  Future<void> _adicionarTag(Subcategoria subcategoria) async {
+    final tags = await ProfissionaisService.instancia.adicionarTag(subcategoria.id);
+    if (!mounted) return;
+    setState(() => _tags = tags);
+  }
+
+  /// Idem, para remoção -- inclusive o erro de "não pode remover a última",
+  /// que o backend recusa com 400 (vira `ApiException`, mostrado pelo
+  /// widget).
+  Future<void> _removerTag(TagSubcategoria tag) async {
+    final tags = await ProfissionaisService.instancia.removerTag(tag.id);
+    if (!mounted) return;
+    setState(() => _tags = tags);
   }
 
   @override
@@ -167,15 +184,11 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   Future<void> _salvar() async {
     final descricao = _descricaoController.text.trim();
     final cep = _cepController.text.trim();
-    final categoria = _categoriaSelecionada;
-    final subcategoria = _subcategoriaSelecionada;
 
-    if (descricao.isEmpty && cep.isEmpty && _fotoEscolhida == null && categoria == null) {
+    if (descricao.isEmpty && cep.isEmpty && _fotoEscolhida == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Altere a descrição, informe um CEP, escolha uma foto ou uma categoria antes de salvar.',
-          ),
+          content: Text('Altere a descrição, informe um CEP ou escolha uma foto antes de salvar.'),
         ),
       );
       return;
@@ -190,24 +203,11 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
       return;
     }
 
-    // Categoria/subcategoria só existem JUNTAS -- o seletor já força isso na
-    // UI (não dá pra "salvar" categoria sem escolher a especialidade), mas
-    // confere de novo aqui, mesmo espírito da validação de CEP acima.
-    if (categoria != null && subcategoria == null) {
-      setState(() => _erroCategoria = 'Escolha também a especialidade.');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Escolha também a especialidade dentro da categoria.')),
-      );
-      return;
-    }
-
     setState(() => _salvando = true);
     try {
       final perfilAtualizado = await ProfissionaisService.instancia.atualizarMeuPerfil(
         descricao: descricao.isNotEmpty ? descricao : null,
         cep: cep.isNotEmpty ? cep : null,
-        categoriaId: categoria?.id,
-        subcategoriaId: subcategoria?.id,
         foto: _fotoEscolhida,
       );
       if (!mounted) return;
@@ -216,14 +216,6 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
         _cepController.clear();
         _enderecoPreview = null;
         _erroCep = null;
-        _categoriaAtualExibicao = perfilAtualizado.atuacao != null
-            ? (perfilAtualizado.categoria != null
-                ? '${perfilAtualizado.atuacao} (em: ${perfilAtualizado.categoria})'
-                : perfilAtualizado.atuacao)
-            : null;
-        _categoriaSelecionada = null;
-        _subcategoriaSelecionada = null;
-        _erroCategoria = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -364,46 +356,21 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
               ],
               const SizedBox(height: 20),
 
-              // Categoria/subcategoria -- mesmo espírito do CEP acima: o
-              // seletor abaixo começa sempre VAZIO; a categoria/especialidade
-              // atual aparece só como texto informativo. Só troca de verdade
-              // escolhendo os dois níveis de novo (ver `_salvar`).
+              // Especialidades -- cada box é uma tag adicionada/removida NA
+              // HORA (não faz parte do "Salvar perfil" em lote abaixo, ver
+              // `_adicionarTag`/`_removerTag`). Sem "categoria única" mais
+              // nesta tela: o profissional pode ter quantas especialidades
+              // quiser, e aparece na busca de QUALQUER uma delas.
+              Text('Especialidades', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
               _carregandoCategorias
                   ? const Center(child: CircularProgressIndicator())
-                  : SeletorCategoriaCascata(
+                  : SelecaoTagsSubcategorias(
                       categorias: _categorias,
-                      categoriaSelecionada: _categoriaSelecionada,
-                      subcategoriaSelecionada: _subcategoriaSelecionada,
-                      errorText: _erroCategoria,
-                      onCategoriaAlterada: (categoria) {
-                        setState(() {
-                          _categoriaSelecionada = categoria;
-                          _erroCategoria = null;
-                        });
-                      },
-                      onSubcategoriaAlterada: (subcategoria) {
-                        setState(() {
-                          _subcategoriaSelecionada = subcategoria;
-                          _erroCategoria = null;
-                        });
-                      },
+                      tagsAtuais: _tags,
+                      aoAdicionar: _adicionarTag,
+                      aoRemover: _removerTag,
                     ),
-              if (_categoriaAtualExibicao != null) ...[
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.category_outlined, size: 16, color: Colors.grey.shade600),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Categoria atual: $_categoriaAtualExibicao',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
               const SizedBox(height: 12),
 
               FilledButton.icon(

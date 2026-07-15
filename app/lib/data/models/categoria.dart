@@ -21,6 +21,37 @@ class Subcategoria {
   }
 }
 
+/// Uma TAG de especialidade de um profissional (migração 11 no backend --
+/// tabela `profissional_subcategorias`, N:N). Diferente de [Subcategoria]
+/// (que é um item da árvore fixa de `GET /categorias`), esta classe espelha
+/// um item do array `subcategorias` que vem DENTRO do perfil de um
+/// profissional (`GET /profissionais/:id`, `GET /profissionais/me/subcategorias`,
+/// etc.) -- por isso já carrega o nome da categoria-mãe junto
+/// (`categoriaNome`), sem precisar cruzar com a árvore completa para exibir
+/// "Eletricista (em: Manutenção e Reforma)".
+class TagSubcategoria {
+  final int id;
+  final String nome;
+  final int categoriaId;
+  final String categoriaNome;
+
+  const TagSubcategoria({
+    required this.id,
+    required this.nome,
+    required this.categoriaId,
+    required this.categoriaNome,
+  });
+
+  factory TagSubcategoria.fromJson(Map<String, dynamic> json) {
+    return TagSubcategoria(
+      id: json['id'] as int,
+      nome: json['nome'] as String,
+      categoriaId: json['categoriaId'] as int,
+      categoriaNome: json['categoriaNome'] as String,
+    );
+  }
+}
+
 /// Uma categoria (o "pai") -- ex.: "Beleza e Bem-Estar" -- já vem com a
 /// lista completa de subcategorias dela dentro. É a árvore inteira que
 /// `GET /categorias` devolve de uma vez (ver categorias.repository.ts no
