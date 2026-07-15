@@ -36,6 +36,14 @@ const _centroManaus = LatLng(-3.130130, -60.023400);
 /// ter sido levantado de 100 para 500 especificamente para esta rota.
 const _limiteDeProfissionaisNoMapa = 200;
 
+/// Distância mínima entre qualquer conteúdo e a borda da tela -- usada em
+/// TODOS os paddings horizontais desta tela (cabeçalho, cartão do mapa,
+/// busca, filtros, grade de categorias). Um valor único, em vez de cada
+/// trecho inventar o seu, garante que a "respiração" nas bordas seja
+/// sempre a mesma -- e que ajustar esse espaçamento no futuro seja uma
+/// mudança de UMA linha, não uma caça por todo o arquivo.
+const _paddingHorizontal = 24.0;
+
 /// Saudação por horário do dia -- troca o "Olá, Nome" cru de antes por algo
 /// que reage ao momento em que a pessoa está usando o app, mesmo detalhe
 /// pequeno que apps de referência (Uber, iFood) já usam no topo da tela
@@ -313,7 +321,12 @@ class _MapaScreenState extends State<MapaScreen> {
       builder: (context) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            padding: const EdgeInsets.fromLTRB(
+              _paddingHorizontal,
+              20,
+              _paddingHorizontal,
+              24,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -503,8 +516,12 @@ class _MapaScreenState extends State<MapaScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.fundo,
-      body: ListView(
-        padding: EdgeInsets.zero,
+      // `Column` (não mais um único `ListView`) de propósito: o pedido foi
+      // travar o cabeçalho + mapa + filtros no lugar, deixando só a grade
+      // de especialidades, mais abaixo, rolar. A parte de cima (até os
+      // chips de raio) fica FORA de qualquer `Scrollable` -- só o `Expanded`
+      // no fim da coluna rola, e é ele quem carrega o resto.
+      body: Column(
         children: [
           _construirCabecalhoComMapa(
             context,
@@ -520,7 +537,12 @@ class _MapaScreenState extends State<MapaScreen> {
           const SizedBox(height: 134),
 
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            padding: const EdgeInsets.fromLTRB(
+              _paddingHorizontal,
+              0,
+              _paddingHorizontal,
+              8,
+            ),
             child: _construirBarraDeBusca(context),
           ),
 
@@ -532,7 +554,12 @@ class _MapaScreenState extends State<MapaScreen> {
               profissionais.erro == null &&
               profissionais.resultados.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              padding: const EdgeInsets.fromLTRB(
+                _paddingHorizontal,
+                0,
+                _paddingHorizontal,
+                8,
+              ),
               child: Text(
                 '${profissionais.resultados.length} profissional(is) encontrado(s) por perto',
                 style: Theme.of(context).textTheme.bodySmall,
@@ -544,7 +571,7 @@ class _MapaScreenState extends State<MapaScreen> {
           // "Melhores avaliados". Nada de raio aqui; o raio virou um
           // SUB-filtro, que só aparece quando faz sentido (ver abaixo).
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -572,7 +599,12 @@ class _MapaScreenState extends State<MapaScreen> {
                 ? CrossFadeState.showFirst
                 : CrossFadeState.showSecond,
             firstChild: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              padding: const EdgeInsets.fromLTRB(
+                _paddingHorizontal,
+                8,
+                _paddingHorizontal,
+                0,
+              ),
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -602,70 +634,99 @@ class _MapaScreenState extends State<MapaScreen> {
           if (localizacao.carregando || profissionais.carregando)
             const LinearProgressIndicator(minHeight: 2),
 
-          // Aviso de "nenhum resultado" -- antes vivia como um cartão
-          // flutuante sobre o mapa; agora que o mapa é só um cartão de
-          // pré-visualização (não a tela inteira), entra no fluxo normal de
-          // rolagem, logo abaixo dos filtros.
-          if (!localizacao.carregando &&
-              !profissionais.carregando &&
-              localizacao.erro == null &&
-              profissionais.erro == null &&
-              profissionais.jaBuscou &&
-              profissionais.resultados.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-              child: _CartaoSemResultados(
-                temFiltrosAtivos: temFiltrosAtivos,
-                aoLimparFiltros: _limparFiltros,
-              ),
-            ),
-
-          const SizedBox(height: 24),
-
-          // Grade de categorias -- segunda forma de encontrar um
-          // profissional, além do campo de busca: navegar visualmente por
-          // especialidade em vez de já saber o termo exato para digitar.
-          // Cada cartão mostra a contagem REAL de profissionais (soma das
-          // subcategorias, já calculada pelo backend em `GET /categorias`)
-          // -- nunca uma nota ou foto inventada.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text('Explore por especialidade', style: Theme.of(context).textTheme.titleMedium),
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              'Toque numa categoria para ver quem atende perto de você',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          const SizedBox(height: 14),
-          if (_categorias.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.05,
-                children: [
-                  for (final categoria in _categorias)
-                    _CartaoCategoria(
-                      categoria: categoria,
-                      onTap: () => _abrirSeletorDeEspecialidade(categoria),
+          // A PARTIR DAQUI a tela rola -- só a grade de especialidades (e o
+          // aviso de "nenhum resultado", que pertence ao mesmo bloco de
+          // baixo por ficar logo depois dela na ordem de leitura). Tudo
+          // acima desta linha (cabeçalho, mapa, busca, ordenação e raio)
+          // fica fixo na tela, sem rolar junto.
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                // Aviso de "nenhum resultado" -- antes vivia como um cartão
+                // flutuante sobre o mapa; agora entra no topo da área que
+                // rola, logo abaixo dos filtros fixos.
+                if (!localizacao.carregando &&
+                    !profissionais.carregando &&
+                    localizacao.erro == null &&
+                    profissionais.erro == null &&
+                    profissionais.jaBuscou &&
+                    profissionais.resultados.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _paddingHorizontal,
+                      12,
+                      _paddingHorizontal,
+                      0,
                     ),
-                ],
-              ),
+                    child: _CartaoSemResultados(
+                      temFiltrosAtivos: temFiltrosAtivos,
+                      aoLimparFiltros: _limparFiltros,
+                    ),
+                  ),
+
+                const SizedBox(height: 24),
+
+                // Grade de categorias -- segunda forma de encontrar um
+                // profissional, além do campo de busca: navegar visualmente
+                // por especialidade em vez de já saber o termo exato para
+                // digitar. Cada cartão mostra a contagem REAL de
+                // profissionais (soma das subcategorias, já calculada pelo
+                // backend em `GET /categorias`) -- nunca uma nota ou foto
+                // inventada.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+                  child: Text(
+                    'Explore por especialidade',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+                  child: Text(
+                    'Toque numa categoria para ver quem atende perto de você',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                if (_categorias.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+                    // 4 colunas -- grade bem mais densa do que a versão
+                    // anterior (2 colunas), como pedido. Cartão mais
+                    // compacto (ver `_CartaoCategoria`) pra caber texto e um
+                    // ícone GRANDE mesmo com a largura reduzida.
+                    child: GridView.count(
+                      crossAxisCount: 4,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 10,
+                      // Cartão bem mais ESTREITO do que alto (0.5) de
+                      // propósito: com 4 por linha, cada célula fica com
+                      // largura pequena -- ícone de 52px + nome em até 2
+                      // linhas + contagem só cabem sem cortar/estourar se a
+                      // célula for mais alta do que larga.
+                      childAspectRatio: 0.5,
+                      children: [
+                        for (final categoria in _categorias)
+                          _CartaoCategoria(
+                            categoria: categoria,
+                            onTap: () => _abrirSeletorDeEspecialidade(categoria),
+                          ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 28),
+              ],
             ),
-          const SizedBox(height: 28),
+          ),
         ],
       ),
     );
@@ -695,6 +756,14 @@ class _MapaScreenState extends State<MapaScreen> {
     const sobreposicao = 36.0;
     const topoDoCartao = alturaCabecalho - sobreposicao;
 
+    // Versão mais escura da cor de destaque, só para o cabeçalho -- pedido
+    // explícito ("essa cor azul de cima, seja mais escura"). `AppColors.destaque`
+    // em si NÃO muda (ela é usada em botões/chips/ícones em todo o resto do
+    // app); em vez de escurecer a paleta inteira, misturamos 30% de preto só
+    // aqui, com `Color.lerp`, o que mantém a MESMA cor-base (nada de um tom
+    // novo inventado) só que mais profunda.
+    final corCabecalho = Color.lerp(AppColors.destaque, Colors.black, 0.3)!;
+
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -705,14 +774,19 @@ class _MapaScreenState extends State<MapaScreen> {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [AppColors.destaque, AppColors.destaque.withValues(alpha: 0.82)],
+              colors: [corCabecalho, corCabecalho.withValues(alpha: 0.85)],
             ),
             borderRadius: const BorderRadius.only(
               bottomLeft: Radius.circular(32),
               bottomRight: Radius.circular(32),
             ),
           ),
-          padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 14, 12, 0),
+          padding: EdgeInsets.fromLTRB(
+            _paddingHorizontal,
+            MediaQuery.of(context).padding.top + 14,
+            16,
+            0,
+          ),
           child: Row(
             children: [
               ClipOval(
@@ -766,8 +840,8 @@ class _MapaScreenState extends State<MapaScreen> {
           ),
         ),
         Positioned(
-          left: 20,
-          right: 20,
+          left: _paddingHorizontal,
+          right: _paddingHorizontal,
           top: topoDoCartao,
           child: Container(
             height: alturaCartaoMapa,
@@ -904,46 +978,53 @@ class _CartaoCategoria extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Layout mais compacto e VERTICAL (ícone em cima, texto embaixo,
+    // centralizado) -- necessário para caber 4 cartões por linha (antes
+    // eram 2, com texto alinhado à esquerda e uma linha extra pro
+    // "chevron"). Sem o chevron: o cartão inteiro já é clicável, ele só
+    // ocupava espaço que agora faz falta.
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              // Badge do ícone MAIOR do que antes (44 -> 52, ícone 24 -> 28)
+              // -- pedido explícito de "ícones maiores para cada classe".
               Container(
-                width: 44,
-                height: 44,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
                   color: AppColors.destaque.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 alignment: Alignment.center,
-                child: Icon(_iconeParaCategoria(categoria.nome), color: AppColors.destaque),
+                child: Icon(
+                  _iconeParaCategoria(categoria.nome),
+                  color: AppColors.destaque,
+                  size: 28,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 categoria.nome,
-                style: Theme.of(context).textTheme.titleSmall,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelMedium,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              const Spacer(),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '$_totalProfissionais profissional(is)',
-                      style: Theme.of(context).textTheme.bodySmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
-                ],
+              const SizedBox(height: 4),
+              Text(
+                '$_totalProfissionais prof.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
