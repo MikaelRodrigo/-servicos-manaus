@@ -990,3 +990,35 @@ No meio do trabalho, uma tentativa de extrair as camadas do mapa (`TileLayer`/`C
 3. Testar de verdade a "interface mais viva": abrir o app, conferir a splash/login com a logo animada, forçar uma busca sem resultado (filtro raro) pra ver o cartão e o botão "Limpar filtros" funcionando.
 4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
 5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações; testar o fluxo completo de solicitar serviço com especialidade; testar o painel de desempenho com dados reais (zero avaliação e populado).
+
+---
+
+## Sessão de 15/07/2026 (continuação 4) — Foto de perfil real no cabeçalho do mapa
+
+### Pedido
+Usuário mandou um print da tela inicial (mapa) mostrando o avatar de iniciais recém-adicionado e pediu: "Preciso que a foto de perfil do prestador de serviço ou cliente, apareçam na tela de boas vindas".
+
+### Investigação antes de codar
+`Usuario` (modelo do `AuthProvider`) não tinha campo de foto nenhum, e a resposta de `POST /auth/login` também não devolvia `url_foto_perfil` -- só `id`/`email`/`nome`. A foto de verdade só existia em `PerfilProfissional`/`PerfilCliente` (buscados em telas separadas). Confirmado também que `clientes.url_foto_perfil` e `profissionais.url_foto_perfil` são a MESMA coluna nas duas tabelas (migrações 04 e 06) -- não existe um `url_foto_cliente` "de perfil" (esse nome já é usado, sem relação, pelo apelido da FOTO DE QUEM AVALIOU dentro da view de portfólio).
+
+### O que foi feito
+- Backend: `auth.repository.ts` -- `UsuarioAutenticavel` ganhou `url_foto_perfil`; os dois SELECTs (cliente e profissional) passaram a trazer essa coluna. `auth.routes.ts` -- `POST /auth/login` agora inclui `url_foto_perfil` no objeto `usuario` da resposta, então a foto já chega pronta no login, sem chamada extra à API.
+- Flutter: `Usuario` ganhou `urlFotoPerfil` (nullable), parseado em `fromJson`/`fromJsonCompleto` e persistido em `toJson` (guardado no `flutter_secure_storage`, senão sumiria ao reabrir o app). Novo método `copiarCom()` para criar uma cópia com a foto atualizada.
+- `AuthProvider` ganhou `atualizarFotoPerfil(String? url)`: atualiza `_usuario` em memória, persiste no secure storage e notifica listeners -- criado para resolver um problema que apareceria na primeira tentativa: sem isso, trocar a foto em `EditarPerfilScreen`/`PerfilClienteScreen` só atualizaria a tela de edição, e o avatar do mapa continuaria mostrando a foto (ou a falta dela) do momento do login até a pessoa deslogar e logar de novo.
+- `editar_perfil_screen.dart` e `perfil_cliente_screen.dart`: depois de salvar com sucesso, se uma foto nova foi escolhida, chamam `context.read<AuthProvider>().atualizarFotoPerfil(...)` com a URL devolvida pelo backend -- o avatar do mapa atualiza na hora ao voltar pra tela inicial.
+- `mapa_screen.dart`: o `CircleAvatar` de inicial virou `ClipOval` com `Image.network` (via `ApiConfig.urlAbsoluta`) quando existe foto, com `errorBuilder` caindo no mesmo fallback de inicial (novo widget `_AvatarIniciais`, mesmo espírito do `_IconeFallback` já usado nos pinos do mapa) quando não há foto ou a imagem falha ao carregar.
+
+### Verificação feita
+- Balanceamento de `(`/`{`/`[`/`}`/`)`/`]` via script Python nos 7 arquivos tocados (5 Dart + 2 TypeScript): todos batendo.
+- Checagem de bytes nulos (0 em todos) e `npx tsc --noEmit` no backend: limpo, sem erros.
+- Mount bash estava truncado (mesmo bug recorrente de sempre) em TODOS os 7 arquivos desta vez; reescritos via heredoc + `tr -d '\000'`, linha por linha conferida contra o conteúdo real do lado Windows.
+- `git diff --stat` revisado: 110 inserções / 12 deleções, todas nos pontos esperados -- nenhuma deleção acidental.
+- Commit `f5a28cd` criado.
+- **Não testado nesta sessão**: rodar o app de verdade com um usuário que já tem foto cadastrada (cliente ou profissional) para confirmar visualmente o avatar carregando, e o fluxo de trocar a foto e ver o cabeçalho atualizar sem relogar.
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` para enviar todos os commits pendentes (agora incluindo `f5a28cd`).
+2. Rodar as migrações 11 e 12 no Neon (ainda não confirmado que rodaram).
+3. Testar de verdade a foto no cabeçalho: logar com um usuário que já tem `url_foto_perfil` preenchida e conferir que aparece; trocar a foto em "Editar perfil"/"Meu perfil" e conferir que o avatar do mapa muda sem precisar deslogar.
+4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações; testar o fluxo completo de solicitar serviço com especialidade; testar o painel de desempenho com dados reais; testar a "interface mais viva" da sessão anterior (splash/login com logo animada, cartão de "nenhum resultado").
