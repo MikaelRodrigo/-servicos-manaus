@@ -954,3 +954,39 @@ Já existia `buscarResumoDeAvaliacoes` (usada pela rota pública `GET /profissio
 3. Testar o painel de desempenho de verdade: profissional sem avaliação nenhuma (deve mostrar o estado neutro), profissional com avaliações (números batendo com o que está no banco), e o cenário de erro de rede (desligar o backend e confirmar que só o painel falha, o resto da tela continua editável).
 4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
 5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações; testar o fluxo completo de solicitar serviço com especialidade (pendência da sessão anterior).
+
+---
+
+## Sessão de 15/07/2026 (continuação 3) — Interface mais viva (estado vazio, cabeçalho, identidade visual)
+
+### Pedido
+Usuário pediu minha opinião de design sobre a tela inicial ("o que mais falta para ficar visualmente mais apresentável"). Apontei três lacunas concretas, lidas direto do código: (1) o mapa não avisa nada quando a busca volta vazia — parece quebrado; (2) o AppBar do mapa é um `Text('Olá, $nome')` cru, sem avatar nem calor; (3) login e splash inicial não têm identidade visual — um ícone solto e um spinner sozinho no branco. Usuário respondeu: "Deixe a interface mais viva então" — aprovação para implementar as três.
+
+### O que foi feito
+- `ProfissionaisProvider` ganhou `_jaBuscou`/`jaBuscou` (setado `true` no `finally` de `buscarProximos`), pra distinguir "ainda não buscou nada" (esperando GPS) de "buscou e não achou ninguém" — sem isso não dava pra saber quando é seguro mostrar um estado vazio.
+- Novo widget `widgets/logo_app.dart` (`LogoApp`): badge circular com gradiente na cor de destaque do tema, ícone de ferramenta, sombra e animação de entrada (fade + "estouro" de escala via `TweenAnimationBuilder`/`Curves.easeOutBack`). Extraído como widget único para login e splash não divergirem visualmente com o tempo.
+- `login_screen.dart`: trocado o `Icon(Icons.handyman)` solto pelo `LogoApp`.
+- `main.dart`: a tela de `StatusAuth.carregando` (splash inicial, a PRIMEIRA coisa que a pessoa vê ao abrir o app) deixou de ser um spinner sozinho no branco e ganhou `LogoApp` + título "Serviços Manaus" + spinner pequeno, com o fundo do tema (`AppColors.fundo`).
+- `mapa_screen.dart`:
+  - AppBar: `Text` cru virou `Row` com `CircleAvatar` de inicial do nome + saudação por horário do dia (`_saudacaoPorHorario()`, "Bom dia"/"Boa tarde"/"Boa noite") em cima do nome.
+  - Contagem viva ("N profissional(is) encontrado(s) por perto") logo abaixo da barra de busca, só quando há resultado e nada está carregando/com erro.
+  - `FlutterMap` passou a viver dentro de um `Stack` (antes era filho direto do `Expanded`) para permitir um cartão flutuante sobreposto.
+  - Novo widget `_CartaoSemResultados`: aparece (`Positioned` sobre o mapa) só quando uma busca de verdade já terminou (sem erro, sem carregar) e voltou vazia. Mensagem muda se há filtro ativo (raio/especialidade/ordenação) — nesse caso mostra botão "Limpar filtros", ligado ao novo método `_limparFiltros()` (volta os três filtros ao neutro e rebusca).
+
+### Percalço nesta sessão
+No meio do trabalho, uma tentativa de extrair as camadas do mapa (`TileLayer`/`CircleLayer`/`MarkerLayer`) para um widget `_MapaComCamadas` separado (pensando em simplificar o `Stack`) deu errado: o parâmetro de posição foi tipado como `Object?` pra evitar importar `Position` do `geolocator`, mas o corpo do widget continuava chamando `.latitude`/`.longitude` nele (erro de tipo), e ainda referenciava por engano campos privados da tela antiga em vez dos parâmetros do próprio widget. Decisão: abandonar a extração e voltar a inlinear o `FlutterMap` direto dentro do `Stack`, sem widget novo — mais simples e sem esse risco. Conferido ao final que não sobrou nenhum resquício de `_MapaComCamadas` no arquivo.
+
+### Verificação feita
+- Balanceamento de `(`/`{`/`[`/`}`/`)`/`]` via script Python nos 5 arquivos Dart tocados (`mapa_screen.dart`, `logo_app.dart` novo, `login_screen.dart`, `main.dart`, `profissionais_provider.dart`): todos batendo.
+- `grep` confirmando que `_MapaComCamadas` não existe mais no arquivo e que `_CartaoSemResultados` está definido exatamente uma vez.
+- Mount bash estava truncado (de novo — bug recorrente já documentado em sessões anteriores) em 4 dos 5 arquivos; reescritos via heredoc + `tr -d '\000'`, contagem de linhas conferida contra o conteúdo real do lado Windows em todos.
+- `git diff` completo revisado arquivo por arquivo: só as mudanças pretendidas, nenhuma deleção acidental.
+- Commit `34a3465` criado.
+- **Não testado nesta sessão**: rodar o app de verdade (emulador/Chrome) para ver a animação de entrada da logo, o cartão de "nenhum resultado" aparecendo/desaparecendo, e o cabeçalho novo em tela pequena vs. larga.
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` para enviar todos os commits pendentes (agora incluindo `34a3465`).
+2. Rodar as migrações 11 e 12 no Neon (ainda não confirmado que rodaram).
+3. Testar de verdade a "interface mais viva": abrir o app, conferir a splash/login com a logo animada, forçar uma busca sem resultado (filtro raro) pra ver o cartão e o botão "Limpar filtros" funcionando.
+4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações; testar o fluxo completo de solicitar serviço com especialidade; testar o painel de desempenho com dados reais (zero avaliação e populado).
