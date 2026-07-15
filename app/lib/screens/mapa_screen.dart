@@ -36,6 +36,12 @@ const _centroManaus = LatLng(-3.130130, -60.023400);
 /// ter sido levantado de 100 para 500 especificamente para esta rota.
 const _limiteDeProfissionaisNoMapa = 200;
 
+/// Zoom mínimo garantido ao centralizar a câmera num profissional
+/// selecionado (toque no pino) -- pedido explícito ("precisa centralizar
+/// quando aquele profissional for escolhido"). Perto o bastante pra ver a
+/// vizinhança dele, sem exagerar (não é um zoom de rua fechado).
+const _zoomAoSelecionarProfissional = 16.0;
+
 /// Distância mínima entre qualquer conteúdo e a borda da tela -- usada em
 /// TODOS os paddings horizontais desta tela (cabeçalho, cartão do mapa,
 /// busca, filtros, grade de categorias). Um valor único, em vez de cada
@@ -461,10 +467,26 @@ class _MapaScreenState extends State<MapaScreen> {
     }
   }
 
-  /// Toca no pino -> vai direto para o perfil público do profissional
+  /// Toca no pino -> o profissional é "selecionado": a câmera centraliza
+  /// nele (pedido explícito) e, em seguida, abre o perfil público dele
   /// (foto, descrição, avaliações e portfólio). O pedido de serviço agora
   /// mora dentro dessa tela, não mais num bottom sheet resumido aqui.
+  ///
+  /// A centralização acontece ANTES de navegar -- o efeito prático é sutil
+  /// enquanto o perfil está aberto por cima (o mapa fica coberto), mas fica
+  /// óbvio ao voltar (botão system-back ou seta): o mapa já está
+  /// centralizado e com zoom de perto no profissional que acabou de ser
+  /// visto, em vez de continuar do jeito que estava antes do toque.
   void _abrirPerfilProfissional(Profissional profissional) {
+    final zoomAtual = _mapController.camera.zoom;
+    _mapController.move(
+      LatLng(profissional.latitude, profissional.longitude),
+      // Nunca AFASTA o zoom pra centralizar -- só aproxima se estiver mais
+      // aberto que `_zoomAoSelecionarProfissional`. Assim, quem já estava
+      // com zoom de perto (ex.: só sobrou um profissional visível) não tem
+      // a visão "puxada pra trás" sem necessidade.
+      math.max(zoomAtual, _zoomAoSelecionarProfissional),
+    );
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PerfilProfissionalScreen(profissionalId: profissional.id),
@@ -532,6 +554,14 @@ class _MapaScreenState extends State<MapaScreen> {
       // no fim da coluna rola, e é ele quem carrega o resto.
       body: Column(
         children: [
+          // `_construirCabecalhoComMapa` agora se embrulha num `SizedBox`
+          // com a altura visual TOTAL (cabeçalho + cartão do mapa que
+          // "vaza" pra fora dele) -- então a `Column` já reserva o espaço
+          // certo sozinha, sem precisar de nenhum `SizedBox` extra de
+          // compensação aqui (ver comentário completo em
+          // `_construirCabecalhoComMapa` sobre por que essa altura
+          // explícita também é o que resolve o mapa não responder a
+          // toque/arrasto na maior parte da área dele).
           _construirCabecalhoComMapa(
             context,
             nomeUsuario: nomeUsuario,
@@ -540,13 +570,6 @@ class _MapaScreenState extends State<MapaScreen> {
             marcadores: marcadores,
             corRaio: corRaio,
           ),
-          // Compensa a altura que o cartão do mapa "protrai" para fora do
-          // cabeçalho curvo (ver `_construirCabecalhoComMapa` acima) -- sem
-          // isso, o próximo conteúdo nasceria por baixo do cartão. Recalculado
-          // depois de aumentar `alturaCartaoMapa` para 220 (mapa mais
-          // "quadrado"): protrusão = topoDoCartao(92) + altura(220) -
-          // cabeçalho(128) = 184.
-          const SizedBox(height: 182),
 
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -798,11 +821,14 @@ class _MapaScreenState extends State<MapaScreen> {
   /// (`AppColors.destaque`, a mesma cor de destaque usada em todo o resto,
   /// nada de cor nova inventada só para esta tela).
   ///
-  /// `Stack` com `clipBehavior: Clip.none` de propósito: é o que permite o
-  /// cartão do mapa (um `Positioned`) desenhar PARA FORA da altura do
-  /// `Container` de fundo, criando o efeito de sobreposição -- o
-  /// `SizedBox` logo depois desta chamada, no `build`, compensa esse
-  /// espaço "extra" para o próximo conteúdo não nascer por baixo do cartão.
+  /// `SizedBox` + `Stack` com `clipBehavior: Clip.none` -- o `SizedBox`
+  /// dá ao `Stack` a altura visual TOTAL (cabeçalho + cartão do mapa que
+  /// "vaza" pra fora dele), enquanto o `Positioned` do cartão do mapa
+  /// desenha PARA FORA da altura do `Container` de fundo, criando o
+  /// efeito de sobreposição. Ver comentário completo em
+  /// `alturaTotalComCartao` abaixo sobre por que o `SizedBox` é
+  /// indispensável (não é só estética -- sem ele, a maior parte do mapa
+  /// fica fora da área que recebe toque/arrasto).
   Widget _construirCabecalhoComMapa(
     BuildContext context, {
     required String nomeUsuario,
@@ -817,6 +843,20 @@ class _MapaScreenState extends State<MapaScreen> {
     const alturaCartaoMapa = 220.0;
     const sobreposicao = 36.0;
     const topoDoCartao = alturaCabecalho - sobreposicao;
+    // Altura visual TOTAL deste widget, do topo do cabeçalho até a borda
+    // de baixo do cartão do mapa (que "vaza" pra fora da altura do
+    // cabeçalho). CRÍTICO pro mapa responder a toque/arrasto: sem isso, o
+    // `Stack` abaixo só teria `alturaCabecalho` (128) de altura "de
+    // verdade" pro Flutter -- e mesmo pintando o cartão do mapa mais pra
+    // baixo (via `Positioned` + `Clip.none`), a ÁREA DE TOQUE do Flutter
+    // não segue a pintura: ela é limitada ao tamanho que o `Stack`
+    // realmente ocupa no layout. Na prática, isso deixava só uma fatia
+    // fina do topo do mapa tocável (os 36px de sobreposição) -- o resto
+    // (a maior parte do mapa) simplesmente não recebia nenhum toque,
+    // arrasto ou tap em marcador, mesmo aparecendo normal na tela. Forçar
+    // o `Stack` a ter essa altura (via `SizedBox` embaixo) resolve isso de
+    // vez: agora a área tocável cobre o cartão do mapa inteiro.
+    const alturaTotalComCartao = topoDoCartao + alturaCartaoMapa;
 
     // Versão mais escura da cor de destaque, só para o cabeçalho -- pedido
     // explícito de novo ("escurecer o azul do topo"; a primeira tentativa,
@@ -828,169 +868,175 @@ class _MapaScreenState extends State<MapaScreen> {
     // profunda, quase um "petróleo".
     final corCabecalho = Color.lerp(AppColors.destaque, Colors.black, 0.45)!;
 
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          height: alturaCabecalho,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [corCabecalho, corCabecalho.withValues(alpha: 0.85)],
-            ),
-            borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(32),
-              bottomRight: Radius.circular(32),
-            ),
-          ),
-          padding: EdgeInsets.fromLTRB(
-            _paddingHorizontal,
-            MediaQuery.of(context).padding.top + 14,
-            16,
-            0,
-          ),
-          child: Row(
-            children: [
-              ClipOval(
-                child: SizedBox(
-                  width: 42,
-                  height: 42,
-                  child: urlFotoUsuario != null
-                      ? Image.network(
-                          urlFotoUsuario,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              AvatarIniciais(nome: nomeUsuario, tamanho: 42),
-                        )
-                      : AvatarIniciais(nome: nomeUsuario, tamanho: 42),
-                ),
+    return SizedBox(
+      height: alturaTotalComCartao,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            height: alturaCabecalho,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [corCabecalho, corCabecalho.withValues(alpha: 0.85)],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _saudacaoPorHorario(),
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                    Text(
-                      nomeUsuario.isNotEmpty ? nomeUsuario : 'Olá!',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(32),
+                bottomRight: Radius.circular(32),
+              ),
+            ),
+            padding: EdgeInsets.fromLTRB(
+              _paddingHorizontal,
+              MediaQuery.of(context).padding.top + 14,
+              16,
+              0,
+            ),
+            child: Row(
+              children: [
+                ClipOval(
+                  child: SizedBox(
+                    width: 42,
+                    height: 42,
+                    child: urlFotoUsuario != null
+                        ? Image.network(
+                            urlFotoUsuario,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                AvatarIniciais(nome: nomeUsuario, tamanho: 42),
+                          )
+                        : AvatarIniciais(nome: nomeUsuario, tamanho: 42),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _saudacaoPorHorario(),
+                        style: const TextStyle(color: Colors.white70, fontSize: 13),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      Text(
+                        nomeUsuario.isNotEmpty ? nomeUsuario : 'Olá!',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Atualizar localização e buscar',
+                  icon: const Icon(Icons.my_location, color: Colors.white),
+                  onPressed: _atualizarLocalizacaoEBuscar,
+                ),
+                IconButton(
+                  tooltip: 'Sair',
+                  icon: const Icon(Icons.logout, color: Colors.white),
+                  onPressed: () => context.read<AuthProvider>().logout(),
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            left: _paddingHorizontal,
+            right: _paddingHorizontal,
+            top: topoDoCartao,
+            child: Container(
+              height: alturaCartaoMapa,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.14),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                child: FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: pontoUsuario ?? _centroManaus,
+                    initialZoom: 12.5,
+                    // Explícito de propósito (mesmo sendo o padrão do
+                    // pacote): garante arrastar/pinçar/zoom por toque
+                    // sempre habilitados. O cartão do mapa agora vive
+                    // DIRETO na `Column` fixa do topo (não mais dentro de
+                    // um `ListView`/`Scrollable`) -- então não há mais um
+                    // scroll de página "roubando" o gesto de toque do mapa;
+                    // e agora o `Stack` que o envolve também tem a altura
+                    // visual TOTAL (ver `alturaTotalComCartao`), então a
+                    // área de toque cobre o cartão inteiro, não só uma
+                    // fatia dele.
+                    interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
+                  ),
+                  children: [
+                    // Camada de "ladrilhos" (as imagens do mapa em si), vindo
+                    // dos servidores públicos do OpenStreetMap.
+                    // `userAgentPackageName` é OBRIGATÓRIO pela política de
+                    // uso do OSM -- sem ele, requests podem ser bloqueadas.
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
+                    ),
+
+                    // Círculo do raio de busca -- puramente visual (overlay),
+                    // nunca participa da consulta em si: o filtro de verdade
+                    // continua sendo o `ST_DWithin` do backend (ver
+                    // profissionais.repository.ts).
+                    if (pontoUsuario != null && _ultimoRaioComCirculo != null)
+                      AnimatedOpacity(
+                        opacity: _raioSelecionado != null ? 1 : 0,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
+                          duration: const Duration(milliseconds: 450),
+                          curve: Curves.easeInOut,
+                          builder: (context, raioAnimadoEmMetros, child) {
+                            return CircleLayer(
+                              circles: [
+                                CircleMarker(
+                                  point: pontoUsuario,
+                                  radius: raioAnimadoEmMetros,
+                                  useRadiusInMeter: true,
+                                  color: corRaio.withValues(alpha: 0.10),
+                                  borderColor: corRaio.withValues(alpha: 0.3),
+                                  borderStrokeWidth: 1.2,
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+
+                    MarkerLayer(markers: marcadores),
+                    // Créditos ao OpenStreetMap -- também exigido pela
+                    // política de uso deles. Nunca remova isto de um app que
+                    // usa os ladrilhos gratuitos do OSM.
+                    RichAttributionWidget(
+                      attributions: [
+                        TextSourceAttribution('OpenStreetMap contributors', onTap: () {}),
+                      ],
                     ),
                   ],
                 ),
               ),
-              IconButton(
-                tooltip: 'Atualizar localização e buscar',
-                icon: const Icon(Icons.my_location, color: Colors.white),
-                onPressed: _atualizarLocalizacaoEBuscar,
-              ),
-              IconButton(
-                tooltip: 'Sair',
-                icon: const Icon(Icons.logout, color: Colors.white),
-                onPressed: () => context.read<AuthProvider>().logout(),
-              ),
-            ],
-          ),
-        ),
-        Positioned(
-          left: _paddingHorizontal,
-          right: _paddingHorizontal,
-          top: topoDoCartao,
-          child: Container(
-            height: alturaCartaoMapa,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.14),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              child: FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: pontoUsuario ?? _centroManaus,
-                  initialZoom: 12.5,
-                  // Explícito de propósito (mesmo sendo o padrão do
-                  // pacote): garante arrastar/pinçar/zoom por toque
-                  // sempre habilitados. O cartão do mapa agora vive
-                  // DIRETO na `Column` fixa do topo (não mais dentro de
-                  // um `ListView`/`Scrollable`) -- então não há mais um
-                  // scroll de página "roubando" o gesto de toque do mapa;
-                  // essa era a causa raiz do mapa parecer "travado".
-                  interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
-                ),
-                children: [
-                  // Camada de "ladrilhos" (as imagens do mapa em si), vindo
-                  // dos servidores públicos do OpenStreetMap.
-                  // `userAgentPackageName` é OBRIGATÓRIO pela política de
-                  // uso do OSM -- sem ele, requests podem ser bloqueadas.
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
-                  ),
-
-                  // Círculo do raio de busca -- puramente visual (overlay),
-                  // nunca participa da consulta em si: o filtro de verdade
-                  // continua sendo o `ST_DWithin` do backend (ver
-                  // profissionais.repository.ts).
-                  if (pontoUsuario != null && _ultimoRaioComCirculo != null)
-                    AnimatedOpacity(
-                      opacity: _raioSelecionado != null ? 1 : 0,
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
-                        duration: const Duration(milliseconds: 450),
-                        curve: Curves.easeInOut,
-                        builder: (context, raioAnimadoEmMetros, child) {
-                          return CircleLayer(
-                            circles: [
-                              CircleMarker(
-                                point: pontoUsuario,
-                                radius: raioAnimadoEmMetros,
-                                useRadiusInMeter: true,
-                                color: corRaio.withValues(alpha: 0.10),
-                                borderColor: corRaio.withValues(alpha: 0.3),
-                                borderStrokeWidth: 1.2,
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-
-                  MarkerLayer(markers: marcadores),
-                  // Créditos ao OpenStreetMap -- também exigido pela
-                  // política de uso deles. Nunca remova isto de um app que
-                  // usa os ladrilhos gratuitos do OSM.
-                  RichAttributionWidget(
-                    attributions: [
-                      TextSourceAttribution('OpenStreetMap contributors', onTap: () {}),
-                    ],
-                  ),
-                ],
-              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
