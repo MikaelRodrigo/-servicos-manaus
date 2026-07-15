@@ -131,6 +131,43 @@ String _urlImagemParaSubcategoria(String nomeCategoria, String nomeSubcategoria)
   return 'https://loremflickr.com/400/300/$palavraChave?lock=$semente';
 }
 
+/// Fotos REAIS (não-placeholder) enviadas pelo usuário, uma por
+/// subcategoria -- ver `assets/images/subcategorias/` e a entrada
+/// `assets:` em `pubspec.yaml`. Chave = nome EXATO da subcategoria depois
+/// da migração `13_reorganizacao_taxonomia_categorias.sql` (renomeios de
+/// rótulo incluídos) -- se essa migração ainda não rodou no banco em uso,
+/// os nomes antigos ("Pedreiro", "Marceneiro" etc.) não batem com nenhuma
+/// chave aqui e o cartão cai no placeholder de `_urlImagemParaSubcategoria`
+/// normalmente (nunca quebra, só não usa a foto real ainda).
+///
+/// Só cobre as subcategorias para as quais o usuário mandou foto própria;
+/// todas as outras continuam no placeholder do LoremFlickr até ganharem
+/// foto real também.
+const Map<String, String> _fotosLocaisPorSubcategoria = {
+  'Chaveiro': 'assets/images/subcategorias/chaveiro.jpg',
+  'Eletricista': 'assets/images/subcategorias/eletricista.jpg',
+  'Encanador': 'assets/images/subcategorias/encanador.jpg',
+  'Gesseiro': 'assets/images/subcategorias/gesseiro.jpg',
+  'Impermeabilizador': 'assets/images/subcategorias/impermeabilizador.jpg',
+  'Jardineiro': 'assets/images/subcategorias/jardineiro.jpg',
+  'Limpeza de Ar-Condicionado': 'assets/images/subcategorias/limpeza_ar_condicionado.jpg',
+  'Marceneiro / Montador de Móveis': 'assets/images/subcategorias/marceneiro.jpg',
+  'Pedreiro / Alvenaria': 'assets/images/subcategorias/pedreiro.jpg',
+  'Pintor': 'assets/images/subcategorias/pintor.jpg',
+  'Piscineiro': 'assets/images/subcategorias/piscineiro.jpg',
+  'Serralheiro': 'assets/images/subcategorias/serralheiro.jpg',
+  'Telhadista': 'assets/images/subcategorias/telhadista.jpg',
+  'Vidraceiro': 'assets/images/subcategorias/vidraceiro.jpg',
+};
+
+/// Caminho do asset local para uma subcategoria, se existir uma foto real
+/// mandada pelo usuário pra ela (ver `_fotosLocaisPorSubcategoria`); `null`
+/// quando não há -- nesse caso `_CartaoSubcategoria` usa o placeholder de
+/// `_urlImagemParaSubcategoria` normalmente.
+String? _caminhoAssetLocalParaSubcategoria(String nomeSubcategoria) {
+  return _fotosLocaisPorSubcategoria[nomeSubcategoria];
+}
+
 /// Grade de cartões de subcategoria dentro de cada seção -- 4 colunas
 /// (pedido explícito), o que rende 3 linhas para uma categoria com ~12
 /// especialidades (também pedido explícito: "4 horizontais e 3 na
@@ -1107,6 +1144,8 @@ class _CartaoSubcategoria extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final caminhoLocal = _caminhoAssetLocalParaSubcategoria(subcategoria.nome);
+
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
@@ -1115,15 +1154,36 @@ class _CartaoSubcategoria extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.network(
-              _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
-              fit: BoxFit.cover,
-              loadingBuilder: (context, child, progresso) {
-                if (progresso == null) return child;
-                return const ColoredBox(color: AppColors.superficieSecundaria);
-              },
-              errorBuilder: (_, __, ___) => _fundoIconeFallback(),
-            ),
+            // Foto real do usuário quando existe (ver
+            // `_fotosLocaisPorSubcategoria`); senão, o placeholder de
+            // rede de sempre. Se o asset local declarado em `pubspec.yaml`
+            // não existir de fato no disco (usuário ainda não salvou o
+            // arquivo), `errorBuilder` cai pro MESMO placeholder de rede
+            // -- nunca quebra a tela por causa de uma foto que falta.
+            if (caminhoLocal != null)
+              Image.asset(
+                caminhoLocal,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Image.network(
+                  _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, progresso) {
+                    if (progresso == null) return child;
+                    return const ColoredBox(color: AppColors.superficieSecundaria);
+                  },
+                  errorBuilder: (_, __, ___) => _fundoIconeFallback(),
+                ),
+              )
+            else
+              Image.network(
+                _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progresso) {
+                  if (progresso == null) return child;
+                  return const ColoredBox(color: AppColors.superficieSecundaria);
+                },
+                errorBuilder: (_, __, ___) => _fundoIconeFallback(),
+              ),
             // Degradê -- só a metade de baixo escurece, o suficiente pra
             // nome + contagem (sempre brancos) ficarem legíveis sem
             // esconder demais a foto.
