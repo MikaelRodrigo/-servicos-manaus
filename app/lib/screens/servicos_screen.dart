@@ -12,8 +12,17 @@ import 'servico_detalhe_screen.dart';
 /// servicos.routes.ts: cliente vê onde é cliente_id, profissional vê onde
 /// é profissional_id). A tela nem precisa saber disso -- só pede "meus
 /// serviços" e mostra o que vier.
+///
+/// `filtroClienteId`/`tituloPersonalizado` são OPCIONAIS: quando vêm
+/// preenchidos (só o profissional usa isso, a partir de `MeusClientesScreen`),
+/// a tela vira "histórico de serviços com ESTE cliente" em vez da lista
+/// completa -- filtro 100% client-side (sem parâmetro novo no backend), já
+/// que a lista completa já precisa ser buscada de qualquer jeito.
 class ServicosScreen extends StatefulWidget {
-  const ServicosScreen({super.key});
+  final String? filtroClienteId;
+  final String? tituloPersonalizado;
+
+  const ServicosScreen({super.key, this.filtroClienteId, this.tituloPersonalizado});
 
   @override
   State<ServicosScreen> createState() => _ServicosScreenState();
@@ -56,7 +65,7 @@ class _ServicosScreenState extends State<ServicosScreen> {
     final papel = context.watch<AuthProvider>().usuario?.papel;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Meus Serviços')),
+      appBar: AppBar(title: Text(widget.tituloPersonalizado ?? 'Meus Serviços')),
       body: RefreshIndicator(
         onRefresh: _recarregar,
         child: FutureBuilder<List<Servico>>(
@@ -83,7 +92,11 @@ class _ServicosScreenState extends State<ServicosScreen> {
               );
             }
 
-            final servicos = snapshot.data ?? [];
+            final todosOsServicos = snapshot.data ?? [];
+            final servicos = widget.filtroClienteId != null
+                ? todosOsServicos.where((s) => s.clienteId == widget.filtroClienteId).toList()
+                : todosOsServicos;
+
             if (servicos.isEmpty) {
               return ListView(
                 children: [
@@ -91,9 +104,11 @@ class _ServicosScreenState extends State<ServicosScreen> {
                     padding: const EdgeInsets.all(32),
                     child: Center(
                       child: Text(
-                        papel == Papel.cliente
-                            ? 'Você ainda não solicitou nenhum serviço.\nVá até o mapa para encontrar um profissional.'
-                            : 'Nenhum serviço solicitado a você ainda.',
+                        widget.filtroClienteId != null
+                            ? 'Nenhum serviço encontrado para este cliente.'
+                            : papel == Papel.cliente
+                                ? 'Você ainda não solicitou nenhum serviço.\nVá até o mapa para encontrar um profissional.'
+                                : 'Nenhum serviço solicitado a você ainda.',
                         textAlign: TextAlign.center,
                       ),
                     ),

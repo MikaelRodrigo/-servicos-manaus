@@ -265,7 +265,14 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
           ),
         ),
       );
-      Navigator.of(context).pop(perfilAtualizado);
+      // `canPop`: esta tela agora vive em DOIS lugares -- empurrada (push)
+      // a partir de outros pontos do app, ou como uma aba fixa de
+      // `HomeShell` (via `IndexedStack`, "Meus dados" do profissional). Só
+      // faz sentido voltar quando ela foi de fato empilhada; como aba fixa
+      // não há nada para "fechar" -- o SnackBar acima já é a confirmação.
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(perfilAtualizado);
+      }
     } on ApiException catch (erro) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));

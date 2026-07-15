@@ -10,16 +10,16 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
+import '../core/theme/app_theme.dart';
 import '../data/models/categoria.dart';
 import '../data/models/profissional.dart';
-import '../data/models/usuario.dart';
 import '../data/services/api_client.dart';
 import '../data/services/categorias_service.dart';
 import '../providers/auth_provider.dart';
 import '../providers/localizacao_provider.dart';
 import '../providers/profissionais_provider.dart';
+import '../widgets/avatar_iniciais.dart';
 import '../widgets/busca_subcategoria_autocomplete.dart';
-import 'editar_perfil_screen.dart';
 import 'perfil_profissional_screen.dart';
 
 /// Coordenada de fallback -- Teatro Amazonas, Centro de Manaus. Só é usada
@@ -45,6 +45,29 @@ String _saudacaoPorHorario() {
   if (hora < 12) return 'Bom dia';
   if (hora < 18) return 'Boa tarde';
   return 'Boa noite';
+}
+
+/// Ícone representativo de cada categoria, escolhido por palavra-chave no
+/// nome -- NUNCA por foto (o backend não tem imagem nenhuma de categoria,
+/// ver `categoria.dart`; inventar fotos de banco de imagens pareceria dado
+/// real sem ser). É puramente decorativo/de navegação, com um fallback
+/// neutro (`Icons.apps_rounded`) para qualquer categoria futura que não
+/// bata em nenhuma palavra-chave conhecida.
+IconData _iconeParaCategoria(String nome) {
+  final n = nome.toLowerCase();
+  if (n.contains('manuten') || n.contains('reform')) return Icons.home_repair_service_rounded;
+  if (n.contains('log') || n.contains('transport')) return Icons.local_shipping_rounded;
+  if (n.contains('beleza') || n.contains('bem-estar') || n.contains('bem estar')) {
+    return Icons.spa_rounded;
+  }
+  if (n.contains('tecnolog') || n.contains('digital')) return Icons.computer_rounded;
+  if (n.contains('educa') || n.contains('consultoria')) return Icons.school_rounded;
+  if (n.contains('aliment') || n.contains('evento')) return Icons.restaurant_rounded;
+  if (n.contains('pet') || n.contains('animal')) return Icons.pets_rounded;
+  if (n.contains('limpeza')) return Icons.cleaning_services_rounded;
+  if (n.contains('saude') || n.contains('saúde')) return Icons.health_and_safety_rounded;
+  if (n.contains('jardim')) return Icons.yard_rounded;
+  return Icons.apps_rounded;
 }
 
 /// As três formas de ordenar o resultado da busca -- espelha
@@ -152,8 +175,9 @@ class _MapaScreenState extends State<MapaScreen> {
       setState(() => _categorias = categorias);
     } on ApiException {
       // Falha silenciosa de propósito: sem a lista, o campo de busca por
-      // especialidade simplesmente fica sem opções -- o mapa em si (que já
-      // buscou por localização) continua funcionando normalmente.
+      // especialidade e a grade de categorias simplesmente ficam vazios --
+      // o mapa em si (que já buscou por localização) continua funcionando
+      // normalmente.
     }
   }
 
@@ -264,8 +288,10 @@ class _MapaScreenState extends State<MapaScreen> {
     );
   }
 
-  /// Chamado quando a pessoa escolhe (ou remove) uma especialidade no
-  /// `BuscaSubcategoriaAutocomplete` -- rebusca automaticamente com o novo
+  /// Chamado quando a pessoa escolhe (ou remove) uma especialidade -- seja
+  /// pelo campo de busca (`BuscaSubcategoriaAutocomplete`) seja pela folha
+  /// de especialidades aberta a partir de um cartão de categoria (ver
+  /// `_abrirSeletorDeEspecialidade`) -- rebusca automaticamente com o novo
   /// filtro, sem precisar de um botão "aplicar" separado.
   void _aoMudarSubcategoria(Subcategoria? subcategoria) {
     setState(() => _subcategoriaSelecionada = subcategoria);
@@ -273,6 +299,75 @@ class _MapaScreenState extends State<MapaScreen> {
     if (posicao != null) {
       _buscar(posicao.latitude, posicao.longitude);
     }
+  }
+
+  /// Segunda "porta de entrada" pro mesmo filtro de especialidade -- abre
+  /// uma folha inferior com as subcategorias da categoria tocada na grade
+  /// (ver `_CartaoCategoria`). Escolher uma delas chama exatamente
+  /// `_aoMudarSubcategoria`, a mesma função usada pelo campo de busca --
+  /// nenhuma lógica de filtro/busca é duplicada, só a forma de CHEGAR nela.
+  void _abrirSeletorDeEspecialidade(Categoria categoria) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.destaque.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(_iconeParaCategoria(categoria.nome), color: AppColors.destaque),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(categoria.nome, style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Escolha a especialidade que você precisa',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+                if (categoria.subcategorias.isEmpty)
+                  Text(
+                    'Nenhuma especialidade cadastrada nesta categoria ainda.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final subcategoria in categoria.subcategorias)
+                        ActionChip(
+                          label: Text('${subcategoria.nome} (${subcategoria.totalProfissionais})'),
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            _aoMudarSubcategoria(subcategoria);
+                          },
+                        ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   /// Mesmo espírito de `_aoMudarSubcategoria` acima -- trocar o raio ou a
@@ -362,20 +457,18 @@ class _MapaScreenState extends State<MapaScreen> {
     final usuario = context.watch<AuthProvider>().usuario;
 
     final posicaoAtual = localizacao.posicao;
+    final pontoUsuario =
+        posicaoAtual != null ? LatLng(posicaoAtual.latitude, posicaoAtual.longitude) : null;
 
     // Cor do círculo do raio -- puxa do tema central (ver core/theme/app_theme.dart)
     // em vez de fixar uma cor aqui, pra ficar automaticamente consistente com o
     // resto da identidade visual do app (e acompanhar se o tema mudar no futuro).
-    // A cor de base do tema (`AppColors.destaque`, um verde-azulado) já cai
-    // naturalmente na paleta "azul ou verde" pedida -- o efeito "pastel"
-    // pedido vem de baixar bastante a opacidade (abaixo), não de trocar a
-    // cor em si.
     final corRaio = Theme.of(context).colorScheme.primary;
 
     final marcadores = <Marker>[
-      if (posicaoAtual != null)
+      if (pontoUsuario != null)
         Marker(
-          point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
+          point: pontoUsuario,
           width: 24,
           height: 24,
           child: const DecoratedBox(
@@ -402,96 +495,33 @@ class _MapaScreenState extends State<MapaScreen> {
     ];
 
     final nomeUsuario = usuario?.nome.trim() ?? '';
-    final inicialUsuario = nomeUsuario.isNotEmpty ? nomeUsuario[0].toUpperCase() : '?';
     final urlFotoUsuario = ApiConfig.urlAbsoluta(usuario?.urlFotoPerfil);
 
+    final temFiltrosAtivos = _subcategoriaSelecionada != null ||
+        _raioSelecionado != null ||
+        _ordenacaoSelecionada != _OrdenacaoBusca.distancia;
+
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 68,
-        // Cabeçalho mais caloroso: avatar com a inicial do nome + saudação
-        // por horário do dia, em vez do "Olá, Nome" cru de antes -- mesmo
-        // espírito visual dos avatares de iniciais já usados no portfólio
-        // (`_CartaoPortfolio`) e no painel de desempenho.
-        title: Row(
-          children: [
-            // Foto de perfil de verdade quando existe (cliente ou
-            // profissional -- ambos podem cadastrar uma em suas telas de
-            // editar perfil); cai na inicial do nome, do mesmo jeito que o
-            // resto do app (ver `_IconeFallback` no marcador do mapa),
-            // quando não há foto ou a imagem falha ao carregar.
-            ClipOval(
-              child: SizedBox(
-                width: 38,
-                height: 38,
-                child: urlFotoUsuario != null
-                    ? Image.network(
-                        urlFotoUsuario,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _AvatarIniciais(inicial: inicialUsuario),
-                      )
-                    : _AvatarIniciais(inicial: inicialUsuario),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_saudacaoPorHorario(), style: Theme.of(context).textTheme.bodySmall),
-                  Text(
-                    nomeUsuario,
-                    style: Theme.of(context).textTheme.titleMedium,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          // Só profissional tem perfil público para editar -- cliente não
-          // aparece no mapa, então não tem "perfil" nesse sentido.
-          if (usuario?.papel == Papel.profissional)
-            IconButton(
-              tooltip: 'Editar meu perfil',
-              icon: const Icon(Icons.edit),
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const EditarPerfilScreen()),
-                );
-              },
-            ),
-          IconButton(
-            tooltip: 'Sair',
-            icon: const Icon(Icons.logout),
-            onPressed: () => context.read<AuthProvider>().logout(),
-          ),
-        ],
-      ),
-      body: Column(
+      backgroundColor: AppColors.fundo,
+      body: ListView(
+        padding: EdgeInsets.zero,
         children: [
+          _construirCabecalhoComMapa(
+            context,
+            nomeUsuario: nomeUsuario,
+            urlFotoUsuario: urlFotoUsuario,
+            pontoUsuario: pontoUsuario,
+            marcadores: marcadores,
+            corRaio: corRaio,
+          ),
+          // Compensa a altura que o cartão do mapa "protrai" para fora do
+          // cabeçalho curvo (ver `_alturaProtrusao` dentro do método acima)
+          // -- sem isso, o próximo conteúdo nasceria por baixo do cartão.
+          const SizedBox(height: 134),
+
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: BuscaSubcategoriaAutocomplete(
-                    categorias: _categorias,
-                    subcategoriaSelecionada: _subcategoriaSelecionada,
-                    onSelecionada: _aoMudarSubcategoria,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: 'Atualizar localização e buscar',
-                  onPressed: _atualizarLocalizacaoEBuscar,
-                  icon: const Icon(Icons.my_location),
-                ),
-              ],
-            ),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: _construirBarraDeBusca(context),
           ),
 
           // Contagem viva do resultado -- some durante o carregamento/erro
@@ -502,7 +532,7 @@ class _MapaScreenState extends State<MapaScreen> {
               profissionais.erro == null &&
               profissionais.resultados.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
                 '${profissionais.resultados.length} profissional(is) encontrado(s) por perto',
                 style: Theme.of(context).textTheme.bodySmall,
@@ -514,7 +544,7 @@ class _MapaScreenState extends State<MapaScreen> {
           // "Melhores avaliados". Nada de raio aqui; o raio virou um
           // SUB-filtro, que só aparece quando faz sentido (ver abaixo).
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -532,7 +562,7 @@ class _MapaScreenState extends State<MapaScreen> {
           // Sub-filtro de raio (requisito 2): só existe -- visualmente --
           // quando a ordenação é "Mais próximos". `AnimatedCrossFade` faz a
           // transição pedida no requisito 3 (entra com fade + desliza pra
-          // baixo empurrando o mapa, sai do mesmo jeito), sem precisar de
+          // baixo empurrando o resto, sai do mesmo jeito), sem precisar de
           // `AnimatedContainer`/`AnimatedSize` manual: ele já anima altura E
           // opacidade dos dois lados ao trocar `crossFadeState`.
           AnimatedCrossFade(
@@ -542,7 +572,7 @@ class _MapaScreenState extends State<MapaScreen> {
                 ? CrossFadeState.showFirst
                 : CrossFadeState.showSecond,
             firstChild: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -572,134 +602,352 @@ class _MapaScreenState extends State<MapaScreen> {
           if (localizacao.carregando || profissionais.carregando)
             const LinearProgressIndicator(minHeight: 2),
 
-          Expanded(
-            child: Stack(
-              children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: posicaoAtual != null
-                        ? LatLng(posicaoAtual.latitude, posicaoAtual.longitude)
-                        : _centroManaus,
-                    initialZoom: 13,
-                  ),
-                  children: [
-                    // Camada de "ladrilhos" (as imagens do mapa em si), vindo
-                    // dos servidores públicos do OpenStreetMap. `userAgentPackageName`
-                    // é OBRIGATÓRIO pela política de uso do OSM -- sem ele,
-                    // requests podem ser bloqueadas.
-                    TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
+          // Aviso de "nenhum resultado" -- antes vivia como um cartão
+          // flutuante sobre o mapa; agora que o mapa é só um cartão de
+          // pré-visualização (não a tela inteira), entra no fluxo normal de
+          // rolagem, logo abaixo dos filtros.
+          if (!localizacao.carregando &&
+              !profissionais.carregando &&
+              localizacao.erro == null &&
+              profissionais.erro == null &&
+              profissionais.jaBuscou &&
+              profissionais.resultados.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              child: _CartaoSemResultados(
+                temFiltrosAtivos: temFiltrosAtivos,
+                aoLimparFiltros: _limparFiltros,
+              ),
+            ),
+
+          const SizedBox(height: 24),
+
+          // Grade de categorias -- segunda forma de encontrar um
+          // profissional, além do campo de busca: navegar visualmente por
+          // especialidade em vez de já saber o termo exato para digitar.
+          // Cada cartão mostra a contagem REAL de profissionais (soma das
+          // subcategorias, já calculada pelo backend em `GET /categorias`)
+          // -- nunca uma nota ou foto inventada.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text('Explore por especialidade', style: Theme.of(context).textTheme.titleMedium),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              'Toque numa categoria para ver quem atende perto de você',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (_categorias.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 1.05,
+                children: [
+                  for (final categoria in _categorias)
+                    _CartaoCategoria(
+                      categoria: categoria,
+                      onTap: () => _abrirSeletorDeEspecialidade(categoria),
                     ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 28),
+        ],
+      ),
+    );
+  }
 
-                    // Círculo do raio de busca -- puramente visual (overlay), nunca
-                    // participa da consulta em si: o filtro de verdade continua sendo
-                    // o `ST_DWithin` do backend (ver profissionais.repository.ts). Este
-                    // círculo só representa, na tela, a mesma "cerca" que o backend já
-                    // está aplicando -- se algum dia os dois divergirem é bug de UI, não
-                    // de busca.
-                    //
-                    // Fica ANTES do `MarkerLayer` de propósito: assim o preenchimento
-                    // translúcido desenha por baixo dos pinos dos profissionais, nunca
-                    // por cima escondendo-os.
-                    //
-                    // Sempre presente na árvore quando existe algum raio "conhecido"
-                    // (`_ultimoRaioComCirculo`) -- mesmo com o toggle desligado --
-                    // porque é isso que permite o `AnimatedOpacity` abaixo animar de
-                    // verdade a transição de aparecer/sumir (widget removido da árvore
-                    // não tem entrada/saída animada; a opacidade indo a 0 é o que
-                    // simula o "removeLayer" pedido, sem tirar o widget do lugar no
-                    // meio da animação).
-                    if (posicaoAtual != null && _ultimoRaioComCirculo != null)
-                      AnimatedOpacity(
-                        opacity: _raioSelecionado != null ? 1 : 0,
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                        // `TweenAnimationBuilder` sozinho, sem `AnimationController`
-                        // manual: ele detecta a troca de `_ultimoRaioComCirculo.km` a
-                        // cada rebuild e anima o valor atual do raio (em metros)
-                        // suavemente até o novo alvo -- é o que faz o círculo
-                        // "crescer"/"encolher" ao trocar de 2km pra 15km, em vez de
-                        // saltar de um tamanho pro outro. Ao desligar o toggle, o
-                        // valor não muda (ver comentário no campo), então só a
-                        // opacidade acima anima -- o círculo desaparece do mesmo
-                        // tamanho, sem "implodir" no processo.
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
-                          duration: const Duration(milliseconds: 450),
-                          curve: Curves.easeInOut,
-                          builder: (context, raioAnimadoEmMetros, child) {
-                            return CircleLayer(
-                              circles: [
-                                CircleMarker(
-                                  point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
-                                  radius: raioAnimadoEmMetros,
-                                  useRadiusInMeter: true,
-                                  // Preenchimento pastel e bem translúcido -- suavizado
-                                  // a pedido (a versão anterior estava "agressiva"
-                                  // demais): opacidade baixa o suficiente pra não
-                                  // esconder os detalhes do mapa nem as fotos dos
-                                  // profissionais por baixo.
-                                  color: corRaio.withValues(alpha: 0.10),
-                                  // Borda FINA (1.2, contra os 2 de antes) e bem mais
-                                  // transparente (0.3 -- o valor pedido) que o
-                                  // preenchimento, pra marcar o limite do raio sem
-                                  // "gritar" na tela. `flutter_map` não tem suporte
-                                  // nativo a borda tracejada em `CircleMarker` (só
-                                  // `Polyline` tem `isDotted`); como o pedido permitia
-                                  // "tracejada OU levemente transparente", a rota mais
-                                  // simples e visualmente equivalente foi essa.
-                                  borderColor: corRaio.withValues(alpha: 0.3),
-                                  borderStrokeWidth: 1.2,
-                                ),
-                              ],
-                            );
-                          },
-                        ),
+  /// Cabeçalho curvo com identidade + saudação, com o cartão do mapa
+  /// "flutuando" sobre a borda inferior dele -- o layout pedido a partir de
+  /// uma referência visual, adaptado à paleta e aos dados reais do app
+  /// (`AppColors.destaque`, a mesma cor de destaque usada em todo o resto,
+  /// nada de cor nova inventada só para esta tela).
+  ///
+  /// `Stack` com `clipBehavior: Clip.none` de propósito: é o que permite o
+  /// cartão do mapa (um `Positioned`) desenhar PARA FORA da altura do
+  /// `Container` de fundo, criando o efeito de sobreposição -- o
+  /// `SizedBox` logo depois desta chamada, no `build`, compensa esse
+  /// espaço "extra" para o próximo conteúdo não nascer por baixo do cartão.
+  Widget _construirCabecalhoComMapa(
+    BuildContext context, {
+    required String nomeUsuario,
+    required String? urlFotoUsuario,
+    required LatLng? pontoUsuario,
+    required List<Marker> marcadores,
+    required Color corRaio,
+  }) {
+    const alturaCabecalho = 128.0;
+    const alturaCartaoMapa = 172.0;
+    const sobreposicao = 36.0;
+    const topoDoCartao = alturaCabecalho - sobreposicao;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          height: alturaCabecalho,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.destaque, AppColors.destaque.withValues(alpha: 0.82)],
+            ),
+            borderRadius: const BorderRadius.only(
+              bottomLeft: Radius.circular(32),
+              bottomRight: Radius.circular(32),
+            ),
+          ),
+          padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 14, 12, 0),
+          child: Row(
+            children: [
+              ClipOval(
+                child: SizedBox(
+                  width: 42,
+                  height: 42,
+                  child: urlFotoUsuario != null
+                      ? Image.network(
+                          urlFotoUsuario,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              AvatarIniciais(nome: nomeUsuario, tamanho: 42),
+                        )
+                      : AvatarIniciais(nome: nomeUsuario, tamanho: 42),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _saudacaoPorHorario(),
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                    Text(
+                      nomeUsuario.isNotEmpty ? nomeUsuario : 'Olá!',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
                       ),
-
-                    MarkerLayer(markers: marcadores),
-                    // Créditos ao OpenStreetMap -- também exigido pela política
-                    // de uso deles. Nunca remova isto de um app que usa os
-                    // ladrilhos gratuitos do OSM.
-                    RichAttributionWidget(
-                      attributions: [
-                        TextSourceAttribution(
-                          'OpenStreetMap contributors',
-                          onTap: () {},
-                        ),
-                      ],
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
-
-                // Cartão flutuante de "nenhum resultado" -- só aparece
-                // quando uma busca de verdade JÁ terminou (não durante o
-                // carregamento inicial, esperando o GPS) e voltou vazia, sem
-                // erro. Antes disso o mapa simplesmente ficava sem pino
-                // nenhum, sem explicar por quê -- parecia quebrado.
-                if (!localizacao.carregando &&
-                    !profissionais.carregando &&
-                    localizacao.erro == null &&
-                    profissionais.erro == null &&
-                    profissionais.jaBuscou &&
-                    profissionais.resultados.isEmpty)
-                  Positioned(
-                    left: 24,
-                    right: 24,
-                    top: 16,
-                    child: _CartaoSemResultados(
-                      temFiltrosAtivos: _subcategoriaSelecionada != null ||
-                          _raioSelecionado != null ||
-                          _ordenacaoSelecionada != _OrdenacaoBusca.distancia,
-                      aoLimparFiltros: _limparFiltros,
-                    ),
-                  ),
+              ),
+              IconButton(
+                tooltip: 'Atualizar localização e buscar',
+                icon: const Icon(Icons.my_location, color: Colors.white),
+                onPressed: _atualizarLocalizacaoEBuscar,
+              ),
+              IconButton(
+                tooltip: 'Sair',
+                icon: const Icon(Icons.logout, color: Colors.white),
+                onPressed: () => context.read<AuthProvider>().logout(),
+              ),
+            ],
+          ),
+        ),
+        Positioned(
+          left: 20,
+          right: 20,
+          top: topoDoCartao,
+          child: Container(
+            height: alturaCartaoMapa,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.14),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
               ],
             ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              child: FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: pontoUsuario ?? _centroManaus,
+                  initialZoom: 12.5,
+                ),
+                children: [
+                  // Camada de "ladrilhos" (as imagens do mapa em si), vindo
+                  // dos servidores públicos do OpenStreetMap.
+                  // `userAgentPackageName` é OBRIGATÓRIO pela política de
+                  // uso do OSM -- sem ele, requests podem ser bloqueadas.
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
+                  ),
+
+                  // Círculo do raio de busca -- puramente visual (overlay),
+                  // nunca participa da consulta em si: o filtro de verdade
+                  // continua sendo o `ST_DWithin` do backend (ver
+                  // profissionais.repository.ts).
+                  if (pontoUsuario != null && _ultimoRaioComCirculo != null)
+                    AnimatedOpacity(
+                      opacity: _raioSelecionado != null ? 1 : 0,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
+                        duration: const Duration(milliseconds: 450),
+                        curve: Curves.easeInOut,
+                        builder: (context, raioAnimadoEmMetros, child) {
+                          return CircleLayer(
+                            circles: [
+                              CircleMarker(
+                                point: pontoUsuario,
+                                radius: raioAnimadoEmMetros,
+                                useRadiusInMeter: true,
+                                color: corRaio.withValues(alpha: 0.10),
+                                borderColor: corRaio.withValues(alpha: 0.3),
+                                borderStrokeWidth: 1.2,
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+
+                  MarkerLayer(markers: marcadores),
+                  // Créditos ao OpenStreetMap -- também exigido pela
+                  // política de uso deles. Nunca remova isto de um app que
+                  // usa os ladrilhos gratuitos do OSM.
+                  RichAttributionWidget(
+                    attributions: [
+                      TextSourceAttribution('OpenStreetMap contributors', onTap: () {}),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Campo de busca dentro de um "pill" branco flutuante -- o mesmo
+  /// `BuscaSubcategoriaAutocomplete` de sempre, só que embrulhado num
+  /// `Theme` local que zera a decoração PADRÃO de campo do app (fundo
+  /// cinza + borda, ver `app_theme.dart`) só aqui, porque o fundo já vem do
+  /// `Container` branco por fora -- sem isso, ficaria "cinza dentro de
+  /// branco", um campo dentro do outro.
+  Widget _construirBarraDeBusca(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          inputDecorationTheme: const InputDecorationTheme(
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+          ),
+        ),
+        child: BuscaSubcategoriaAutocomplete(
+          categorias: _categorias,
+          subcategoriaSelecionada: _subcategoriaSelecionada,
+          onSelecionada: _aoMudarSubcategoria,
+        ),
+      ),
+    );
+  }
+}
+
+/// Um cartão de categoria na grade "Explore por especialidade" -- ícone
+/// (nunca foto, ver `_iconeParaCategoria`) + nome + contagem REAL de
+/// profissionais (soma de `totalProfissionais` de todas as subcategorias
+/// dela, já calculada pelo backend). Tocar abre a folha de especialidades
+/// daquela categoria (ver `_abrirSeletorDeEspecialidade`).
+class _CartaoCategoria extends StatelessWidget {
+  final Categoria categoria;
+  final VoidCallback onTap;
+
+  const _CartaoCategoria({required this.categoria, required this.onTap});
+
+  int get _totalProfissionais =>
+      categoria.subcategorias.fold(0, (soma, s) => soma + s.totalProfissionais);
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.destaque.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Icon(_iconeParaCategoria(categoria.nome), color: AppColors.destaque),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                categoria.nome,
+                style: Theme.of(context).textTheme.titleSmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$_totalProfissionais profissional(is)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -795,32 +1043,6 @@ class _TrianguloPainter extends CustomPainter {
   bool shouldRepaint(covariant _TrianguloPainter oldDelegate) => false;
 }
 
-/// Fallback do avatar do cabeçalho quando a pessoa logada ainda não tem foto
-/// de perfil (ou a foto falha ao carregar) -- um círculo colorido com a
-/// inicial do nome, mesmo espírito visual de `_IconeFallback` (marcador do
-/// mapa) e dos avatares de iniciais já usados no portfólio/painel de
-/// desempenho.
-class _AvatarIniciais extends StatelessWidget {
-  final String inicial;
-
-  const _AvatarIniciais({required this.inicial});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Theme.of(context).colorScheme.primaryContainer,
-      alignment: Alignment.center,
-      child: Text(
-        inicial,
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.onPrimaryContainer,
-        ),
-      ),
-    );
-  }
-}
-
 class _AvisoFaixa extends StatelessWidget {
   final String mensagem;
   final Color cor;
@@ -838,11 +1060,11 @@ class _AvisoFaixa extends StatelessWidget {
   }
 }
 
-/// Cartão flutuante mostrado sobre o mapa quando uma busca já terminou (sem
-/// erro, sem estar carregando) e voltou vazia -- ver o `if` que envolve o
-/// `Positioned` deste widget, no `build` de `_MapaScreenState`. Antes disso o
-/// mapa simplesmente ficava sem nenhum pino, sem nenhuma explicação, o que
-/// parecia bug ("sumiu tudo?") em vez de um resultado real de busca.
+/// Aviso mostrado quando uma busca já terminou (sem erro, sem estar
+/// carregando) e voltou vazia -- ver o `if` que envolve este widget, no
+/// `build` de `_MapaScreenState`. Sem isso, o resultado simplesmente
+/// desaparecia sem nenhuma explicação -- parecia bug ("sumiu tudo?") em vez
+/// de um resultado real de busca.
 ///
 /// `temFiltrosAtivos` decide a MENSAGEM e se o botão "Limpar filtros"
 /// aparece: a causa mais comum de zero resultados é um filtro (raio curto,
