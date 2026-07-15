@@ -39,7 +39,7 @@ export interface LocalizacaoPorCep {
   enderecoFormatado: string;
 }
 
-interface RespostaViaCep {
+export interface RespostaViaCep {
   erro?: boolean;
   logradouro?: string;
   bairro?: string;
@@ -71,8 +71,16 @@ async function buscarComTimeout(url: string, cabecalhos: Record<string, string> 
  *
  * `cep` já deve chegar VALIDADO (8 dígitos -- ver `apenasDigitos` em
  * utils/validacao.ts, chamado pela rota antes desta função).
+ *
+ * EXPORTADA (antes era só uso interno) porque `GET /cep/:cep` (ver
+ * routes/cep.routes.ts) reaproveita ela sozinha, SEM a etapa de
+ * geocodificação abaixo -- é o autofill em tempo real do formulário
+ * (rua/bairro/cidade enquanto o profissional digita o CEP), que não
+ * precisa de coordenada nenhuma ainda. A geocodificação de verdade só
+ * acontece quando o perfil é salvo (`buscarLocalizacaoPorCep`, chamada por
+ * `PATCH /profissionais/me`).
  */
-async function buscarEnderecoPorCep(cep: string): Promise<RespostaViaCep> {
+export async function buscarEnderecoPorCep(cep: string): Promise<RespostaViaCep> {
   let resposta: Response;
   try {
     resposta = await buscarComTimeout(`https://viacep.com.br/ws/${cep}/json/`);

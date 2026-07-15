@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
@@ -5,9 +6,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
 import '../data/models/categoria.dart';
+import '../data/models/endereco_cep.dart';
 import '../data/models/perfil_profissional.dart';
 import '../data/services/api_client.dart';
 import '../data/services/categorias_service.dart';
+import '../data/services/cep_service.dart';
 import '../data/services/profissionais_service.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/selecao_foto_perfil.dart';
@@ -41,6 +44,16 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   // mostra ao lado). Evita reenviar sempre o mesmo CEP sem querer.
   String? _enderecoAtualExibicao;
   bool _salvando = false;
+
+  // Autofill em tempo real do CEP: dispara ~500ms depois que o usuário
+  // termina de digitar os 8 dígitos (debounce -- evita bater na API a cada
+  // tecla). `_enderecoPreview` é o endereço RECÉM-CONSULTADO (ainda não
+  // salvo, só uma prévia); é um conceito diferente de `_enderecoAtualExibicao`
+  // acima, que é o endereço já GRAVADO no perfil.
+  Timer? _debounceCep;
+  EnderecoPorCep? _enderecoPreview;
+  bool _consultandoCep = false;
+  String? _erroCep;
 
   // Categoria/subcategoria -- mesmo espírito do CEP acima: o seletor começa
   // sempre VAZIO (nunca pré-selecionado com a categoria atual), e o valor
@@ -91,9 +104,51 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
 
   @override
   void dispose() {
+    _debounceCep?.cancel();
     _descricaoController.dispose();
     _cepController.dispose();
     super.dispose();
+  }
+
+  /// Chamado a cada tecla no campo de CEP. Só dispara a consulta de verdade
+  /// quando: (1) já tem os 8 dígitos completos, e (2) passou meio segundo
+  /// sem nova tecla (debounce -- evita uma chamada de API por dígito
+  /// enquanto a pessoa ainda está digitando). Apagar/editar o CEP depois de
+  /// já ter um preview limpa o preview na hora, sem esperar debounce nenhum.
+  void _aoDigitarCep(String valor) {
+    _debounceCep?.cancel();
+
+    if (valor.length != 8) {
+      setState(() {
+        _enderecoPreview = null;
+        _erroCep = null;
+        _consultandoCep = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _consultandoCep = true;
+      _erroCep = null;
+    });
+
+    _debounceCep = Timer(const Duration(milliseconds: 500), () async {
+      try {
+        final endereco = await CepService.instancia.buscarEndereco(valor);
+        if (!mounted || _cepController.text.trim() != valor) return;
+        setState(() {
+          _enderecoPreview = endereco;
+          _consultandoCep = false;
+        });
+      } on ApiException catch (erro) {
+        if (!mounted || _cepController.text.trim() != valor) return;
+        setState(() {
+          _enderecoPreview = null;
+          _erroCep = erro.mensagem;
+          _consultandoCep = false;
+        });
+      }
+    });
   }
 
   // Escolher origem + selecionar + RECORTAR (1:1) moram todos em
@@ -159,6 +214,8 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
       setState(() {
         _enderecoAtualExibicao = perfilAtualizado.enderecoAtuacao;
         _cepController.clear();
+        _enderecoPreview = null;
+        _erroCep = null;
         _categoriaAtualExibicao = perfilAtualizado.atuacao != null
             ? (perfilAtualizado.categoria != null
                 ? '${perfilAtualizado.atuacao} (em: ${perfilAtualizado.categoria})'
@@ -232,12 +289,63 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 maxLength: 8,
-                decoration: const InputDecoration(
+                onChanged: _aoDigitarCep,
+                decoration: InputDecoration(
                   labelText: 'CEP',
                   hintText: 'Ex.: 69010030',
                   helperText: 'Define onde você aparece no mapa para os clientes.',
+                  suffixIcon: _consultandoCep
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
                 ),
               ),
+              // Preview do endereço encontrado para o CEP recém-digitado --
+              // aparece ANTES de salvar, como confirmação visual imediata
+              // (autofill em tempo real). Erro (CEP inexistente, por
+              // exemplo) some sozinho assim que a pessoa edita o campo de
+              // novo (ver `_aoDigitarCep`).
+              if (_erroCep != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.error_outline, size: 16, color: Theme.of(context).colorScheme.error),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _erroCep!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else if (_enderecoPreview != null && _enderecoPreview!.textoFormatado.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.check_circle_outline, size: 16, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _enderecoPreview!.textoFormatado,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               if (_enderecoAtualExibicao != null && _enderecoAtualExibicao!.trim().isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Row(

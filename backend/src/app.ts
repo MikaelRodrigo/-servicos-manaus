@@ -7,6 +7,7 @@ import { authRouter } from './routes/auth.routes';
 import { servicosRouter } from './routes/servicos.routes';
 import { curtidasRouter } from './routes/curtidas.routes';
 import { categoriasRouter } from './routes/categorias.routes';
+import { cepRouter } from './routes/cep.routes';
 import { ErroDeValidacao, ErroDeConflito, ErroNaoEncontrado } from './utils/validacao';
 import { ErroDeAutenticacao } from './middlewares/autenticacao';
 import { ehErroDeUpload, mensagemDeErroUpload } from './middlewares/upload';
@@ -49,6 +50,7 @@ app.use('/auth', authRouter);
 app.use('/servicos', servicosRouter);
 app.use('/avaliacoes', curtidasRouter);
 app.use('/categorias', categoriasRouter);
+app.use('/cep', cepRouter);
 
 /* ---------------------------------------------------------------------------
    404 - qualquer rota não registrada acima cai aqui.
