@@ -532,9 +532,12 @@ class _MapaScreenState extends State<MapaScreen> {
             corRaio: corRaio,
           ),
           // Compensa a altura que o cartão do mapa "protrai" para fora do
-          // cabeçalho curvo (ver `_alturaProtrusao` dentro do método acima)
-          // -- sem isso, o próximo conteúdo nasceria por baixo do cartão.
-          const SizedBox(height: 134),
+          // cabeçalho curvo (ver `_construirCabecalhoComMapa` acima) -- sem
+          // isso, o próximo conteúdo nasceria por baixo do cartão. Recalculado
+          // depois de aumentar `alturaCartaoMapa` para 220 (mapa mais
+          // "quadrado"): protrusão = topoDoCartao(92) + altura(220) -
+          // cabeçalho(128) = 184.
+          const SizedBox(height: 182),
 
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -698,22 +701,23 @@ class _MapaScreenState extends State<MapaScreen> {
                 else
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-                    // 4 colunas -- grade bem mais densa do que a versão
-                    // anterior (2 colunas), como pedido. Cartão mais
-                    // compacto (ver `_CartaoCategoria`) pra caber texto e um
-                    // ícone GRANDE mesmo com a largura reduzida.
+                    // 3 colunas -- pedido explícito ("visual mais
+                    // organizado e esteticamente equilibrado" do que 4).
+                    // Células mais largas do que na versão de 4 colunas,
+                    // então o cartão volta a ter mais espaço (ver aspect
+                    // ratio e paddings maiores em `_CartaoCategoria` abaixo).
                     child: GridView.count(
-                      crossAxisCount: 4,
+                      crossAxisCount: 3,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 10,
-                      // Cartão bem mais ESTREITO do que alto (0.5) de
-                      // propósito: com 4 por linha, cada célula fica com
-                      // largura pequena -- ícone de 52px + nome em até 2
-                      // linhas + contagem só cabem sem cortar/estourar se a
-                      // célula for mais alta do que larga.
-                      childAspectRatio: 0.5,
+                      mainAxisSpacing: 14,
+                      crossAxisSpacing: 12,
+                      // Ainda mais alto do que largo (0.6): com o ícone
+                      // maior (58px) e paddings maiores do cartão, mesmo
+                      // com células mais largas (3 colunas) o conteúdo
+                      // continua precisando de bastante altura pra não
+                      // cortar/estourar o nome em 2 linhas + a contagem.
+                      childAspectRatio: 0.6,
                       children: [
                         for (final categoria in _categorias)
                           _CartaoCategoria(
@@ -752,17 +756,21 @@ class _MapaScreenState extends State<MapaScreen> {
     required Color corRaio,
   }) {
     const alturaCabecalho = 128.0;
-    const alturaCartaoMapa = 172.0;
+    // Mapa mais "quadrado" (pedido explícito) -- 172 -> 220, ocupando mais
+    // espaço vertical em vez do formato baixo/alongado de antes.
+    const alturaCartaoMapa = 220.0;
     const sobreposicao = 36.0;
     const topoDoCartao = alturaCabecalho - sobreposicao;
 
     // Versão mais escura da cor de destaque, só para o cabeçalho -- pedido
-    // explícito ("essa cor azul de cima, seja mais escura"). `AppColors.destaque`
-    // em si NÃO muda (ela é usada em botões/chips/ícones em todo o resto do
-    // app); em vez de escurecer a paleta inteira, misturamos 30% de preto só
-    // aqui, com `Color.lerp`, o que mantém a MESMA cor-base (nada de um tom
-    // novo inventado) só que mais profunda.
-    final corCabecalho = Color.lerp(AppColors.destaque, Colors.black, 0.3)!;
+    // explícito de novo ("escurecer o azul do topo"; a primeira tentativa,
+    // 30% de preto, não foi escura o bastante). `AppColors.destaque` em si
+    // NÃO muda (ela é usada em botões/chips/ícones em todo o resto do
+    // app); em vez de escurecer a paleta inteira, misturamos 45% de preto
+    // só aqui, com `Color.lerp` -- mantém a MESMA cor-base (nada de um tom
+    // novo inventado, como um azul genérico do Material) só que bem mais
+    // profunda, quase um "petróleo".
+    final corCabecalho = Color.lerp(AppColors.destaque, Colors.black, 0.45)!;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -863,6 +871,14 @@ class _MapaScreenState extends State<MapaScreen> {
                 options: MapOptions(
                   initialCenter: pontoUsuario ?? _centroManaus,
                   initialZoom: 12.5,
+                  // Explícito de propósito (mesmo sendo o padrão do
+                  // pacote): garante arrastar/pinçar/zoom por toque
+                  // sempre habilitados. O cartão do mapa agora vive
+                  // DIRETO na `Column` fixa do topo (não mais dentro de
+                  // um `ListView`/`Scrollable`) -- então não há mais um
+                  // scroll de página "roubando" o gesto de toque do mapa;
+                  // essa era a causa raiz do mapa parecer "travado".
+                  interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
                 ),
                 children: [
                   // Camada de "ladrilhos" (as imagens do mapa em si), vindo
@@ -978,27 +994,27 @@ class _CartaoCategoria extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Layout mais compacto e VERTICAL (ícone em cima, texto embaixo,
-    // centralizado) -- necessário para caber 4 cartões por linha (antes
-    // eram 2, com texto alinhado à esquerda e uma linha extra pro
-    // "chevron"). Sem o chevron: o cartão inteiro já é clicável, ele só
-    // ocupava espaço que agora faz falta.
+    // Layout compacto e VERTICAL (ícone em cima, texto embaixo,
+    // centralizado) -- volta a ter mais espaço agora que a grade é de 3
+    // colunas (era 4): sem o chevron, que já não cabia antes, o cartão
+    // inteiro continua clicável, ele só ocupava espaço que fazia falta.
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Badge do ícone MAIOR do que antes (44 -> 52, ícone 24 -> 28)
-              // -- pedido explícito de "ícones maiores para cada classe".
+              // Badge do ícone GRANDE (pedido explícito) -- 44 -> 58,
+              // ícone 24 -> 32. Com 3 colunas (mais largas que as 4 de
+              // antes) sobra espaço pra crescer mais um pouco.
               Container(
-                width: 52,
-                height: 52,
+                width: 58,
+                height: 58,
                 decoration: BoxDecoration(
                   color: AppColors.destaque.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(16),
@@ -1007,10 +1023,10 @@ class _CartaoCategoria extends StatelessWidget {
                 child: Icon(
                   _iconeParaCategoria(categoria.nome),
                   color: AppColors.destaque,
-                  size: 28,
+                  size: 32,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Text(
                 categoria.nome,
                 textAlign: TextAlign.center,
