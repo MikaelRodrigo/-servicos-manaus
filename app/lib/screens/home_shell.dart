@@ -15,8 +15,10 @@ import 'servicos_screen.dart';
 const _margemBarraFlutuante = 20.0;
 
 /// Altura da cápsula em si (sem contar o botão circular de Home, que vaza
-/// pra cima dela -- ver `_construirBarraFlutuante`).
-const _alturaBarraFlutuante = 64.0;
+/// pra cima dela -- ver `_construirBarraFlutuante`). Reduzida (64 -> 58,
+/// pedido explícito) pra ocupar menos espaço vertical da tela -- só a
+/// altura muda; largura/margens laterais continuam as mesmas.
+const _alturaBarraFlutuante = 58.0;
 
 /// Diâmetro do botão circular de destaque (Home), sempre no centro
 /// geométrico da barra.

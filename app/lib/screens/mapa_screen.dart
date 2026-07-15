@@ -78,6 +78,57 @@ IconData _iconeParaCategoria(String nome) {
   return Icons.apps_rounded;
 }
 
+/// Foto real ilustrando cada categoria, escolhida pela MESMA lógica de
+/// palavra-chave de `_iconeParaCategoria` -- só que devolvendo uma URL de
+/// foto em vez de um ícone. Usada como fundo dos cartões da grade
+/// "Explore por especialidade" (ver `_CartaoCategoria`), com o ícone
+/// virando o FALLBACK (não o padrão) para quando a foto falha ao carregar.
+///
+/// PLACEHOLDER DE TERCEIROS -- ATENÇÃO ANTES DE PRODUÇÃO: o backend não
+/// tem (ainda) um campo de imagem por categoria (ver `Categoria` em
+/// categoria.dart), então esta função busca fotos temáticas prontas no
+/// LoremFlickr (serviço gratuito, sem chave de API, que devolve fotos
+/// reais do Flickr por palavra-chave -- ver https://loremflickr.com).
+/// Isso resolve o pedido de "fotos reais de alta qualidade" sem inventar
+/// nenhum dado sobre profissionais/avaliações/contagens (que continuam
+/// 100% reais, vindos do backend) -- mas são fotos de TERCEIROS, sem
+/// licença clara confirmada para uso comercial. Antes de lançar o app de
+/// verdade, troque por fotos próprias (ou com licença comercial/CC
+/// confirmada), idealmente vindas do backend (um campo de imagem por
+/// categoria, com upload pelo painel administrativo).
+///
+/// `lock=` faz o LoremFlickr sempre devolver a MESMA foto para a mesma
+/// categoria (em vez de uma foto aleatória diferente a cada rebuild da
+/// tela, o que pareceria um bug de piscar imagem).
+String _urlImagemParaCategoria(String nome) {
+  final n = nome.toLowerCase();
+  final String palavraChave;
+  if (n.contains('manuten') || n.contains('reform')) {
+    palavraChave = 'repair';
+  } else if (n.contains('log') || n.contains('transport')) {
+    palavraChave = 'delivery';
+  } else if (n.contains('beleza') || n.contains('bem-estar') || n.contains('bem estar')) {
+    palavraChave = 'beauty';
+  } else if (n.contains('tecnolog') || n.contains('digital')) {
+    palavraChave = 'technology';
+  } else if (n.contains('educa') || n.contains('consultoria')) {
+    palavraChave = 'education';
+  } else if (n.contains('aliment') || n.contains('evento')) {
+    palavraChave = 'food';
+  } else if (n.contains('pet') || n.contains('animal')) {
+    palavraChave = 'pets';
+  } else if (n.contains('limpeza')) {
+    palavraChave = 'cleaning';
+  } else if (n.contains('saude') || n.contains('saúde')) {
+    palavraChave = 'healthcare';
+  } else if (n.contains('jardim')) {
+    palavraChave = 'garden';
+  } else {
+    palavraChave = 'business';
+  }
+  return 'https://loremflickr.com/400/300/$palavraChave?lock=${nome.hashCode.abs()}';
+}
+
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
 /// não mandar o parâmetro, que já é o padrão "distancia" no backend). São os
@@ -978,11 +1029,17 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 }
 
-/// Um cartão de categoria na grade "Explore por especialidade" -- ícone
-/// (nunca foto, ver `_iconeParaCategoria`) + nome + contagem REAL de
-/// profissionais (soma de `totalProfissionais` de todas as subcategorias
-/// dela, já calculada pelo backend). Tocar abre a folha de especialidades
-/// daquela categoria (ver `_abrirSeletorDeEspecialidade`).
+/// Um cartão de categoria na grade "Explore por especialidade" -- foto real
+/// de fundo (ver `_urlImagemParaCategoria`; PLACEHOLDER de terceiros, ver
+/// comentário completo lá) com um degradê escuro por baixo pra manter o
+/// texto branco legível em qualquer foto, clara ou escura. Nome + contagem
+/// REAL de profissionais (soma de `totalProfissionais` de todas as
+/// subcategorias dela, já calculada pelo backend). Tocar abre a folha de
+/// especialidades daquela categoria (ver `_abrirSeletorDeEspecialidade`).
+///
+/// Se a foto falhar ao carregar (sem internet, serviço fora do ar etc.),
+/// cai no MESMO visual de ícone que a tela usava antes -- nunca mostra um
+/// quadrado quebrado/cinza no lugar dela.
 class _CartaoCategoria extends StatelessWidget {
   final Categoria categoria;
   final VoidCallback onTap;
@@ -994,57 +1051,81 @@ class _CartaoCategoria extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Layout compacto e VERTICAL (ícone em cima, texto embaixo,
-    // centralizado) -- volta a ter mais espaço agora que a grade é de 3
-    // colunas (era 4): sem o chevron, que já não cabia antes, o cartão
-    // inteiro continua clicável, ele só ocupava espaço que fazia falta.
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Badge do ícone GRANDE (pedido explícito) -- 44 -> 58,
-              // ícone 24 -> 32. Com 3 colunas (mais largas que as 4 de
-              // antes) sobra espaço pra crescer mais um pouco.
-              Container(
-                width: 58,
-                height: 58,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              _urlImagemParaCategoria(categoria.nome),
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progresso) {
+                if (progresso == null) return child;
+                return const ColoredBox(color: AppColors.superficieSecundaria);
+              },
+              errorBuilder: (_, __, ___) => _fundoIconeFallback(),
+            ),
+            // Degradê -- só a metade de baixo escurece, o suficiente pra
+            // nome + contagem (sempre brancos) ficarem legíveis sem
+            // esconder demais a foto.
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 76,
+              child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: AppColors.destaque.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  _iconeParaCategoria(categoria.nome),
-                  color: AppColors.destaque,
-                  size: 32,
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Color(0xCC000000)],
+                  ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                categoria.nome,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelMedium,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+            ),
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 10,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    categoria.nome,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$_totalProfissionais prof.',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 10),
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                '$_totalProfissionais prof.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  /// Mesmo visual de "antes" (ícone sobre um fundo claro) -- usado só como
+  /// FALLBACK, quando a foto real falha ao carregar.
+  Widget _fundoIconeFallback() {
+    return ColoredBox(
+      color: AppColors.destaque.withValues(alpha: 0.12),
+      child: Center(
+        child: Icon(_iconeParaCategoria(categoria.nome), color: AppColors.destaque, size: 32),
       ),
     );
   }
