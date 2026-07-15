@@ -179,12 +179,17 @@ export async function buscarAvaliacaoClientePorServico(
 // PORTFÓLIO PÚBLICO do profissional (GET /profissionais/:id/portfolio)
 // ---------------------------------------------------------------------------
 
-/** Espelha as colunas da view vw_historico_portifolio (migração 05, com `url_foto_cliente` adicionado na migração 07). */
+/** Espelha as colunas da view vw_historico_portifolio (migração 05, com `url_foto_cliente` adicionado na migração 07, e `categoria_id`/`subcategoria_id` na migração 12). */
 export interface ItemDePortfolio {
   profissional_id: string;
   id_servico: string;
   avaliacao_id: string;
   cliente_id: string;
+  /** Especialidade contratada neste serviço específico -- ver migração 12. Pode ser `null` só em raríssimos serviços legados sem categoria alguma (nem do profissional). */
+  categoria_id: number | null;
+  categoria_nome: string | null;
+  subcategoria_id: number | null;
+  subcategoria_nome: string | null;
   nome_cliente: string;
   tipo_cliente: 'PF' | 'PJ';
   url_foto_cliente: string | null;
@@ -210,11 +215,17 @@ export interface ItemDePortfolio {
  * gente marca quais avaliações ela já curtiu; sem login, curtido_por_mim
  * vem sempre false (mostrar "curtido" para quem nunca curtiu nada seria
  * um bug de exibição, não uma feature).
+ *
+ * `subcategoriaId` (opcional, migração 12) -- filtra o histórico para só
+ * as avaliações daquela especialidade específica. É o "toggle por
+ * categoria" do perfil público: `null`/ausente devolve o portfólio inteiro
+ * (todas as especialidades misturadas), como sempre funcionou.
  */
 export async function buscarPortifolio(
   profissionalId: string,
   paginacao: { limite: number; offset: number },
   usuarioIdAtual?: string,
+  subcategoriaId?: number,
 ): Promise<ItemDePortfolio[]> {
   const { rows } = await pool.query<ItemDePortfolio>(
     `SELECT
@@ -228,8 +239,15 @@ export async function buscarPortifolio(
        END AS curtido_por_mim
      FROM vw_historico_portifolio v
      WHERE v.profissional_id = $1
+       AND ($5::int IS NULL OR v.subcategoria_id = $5::int)
      LIMIT $2 OFFSET $3`,
-    [profissionalId, paginacao.limite, paginacao.offset, usuarioIdAtual ?? null],
+    [
+      profissionalId,
+      paginacao.limite,
+      paginacao.offset,
+      usuarioIdAtual ?? null,
+      subcategoriaId ?? null,
+    ],
   );
   return rows;
 }

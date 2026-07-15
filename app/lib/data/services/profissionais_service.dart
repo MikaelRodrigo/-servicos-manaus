@@ -94,14 +94,22 @@ class ProfissionaisService {
   /// (via `autenticacaoOpcional`) devolve `curtido_por_mim` correto para
   /// ela. Sem login, o token simplesmente não existe e a rota funciona do
   /// mesmo jeito -- só que com `curtido_por_mim` sempre `false`.
+  /// `subcategoriaId` (opcional, migração 12) filtra o histórico para só
+  /// uma especialidade -- é o toggle "por categoria" do perfil público.
+  /// `null` devolve o portfólio inteiro, todas as especialidades juntas.
   Future<List<ItemPortfolio>> buscarPortfolio(
     String profissionalId, {
     int pagina = 1,
     int limite = 20,
+    int? subcategoriaId,
   }) async {
     final resposta = await _api.get(
       '/profissionais/$profissionalId/portfolio',
-      query: {'pagina': pagina, 'limite': limite},
+      query: {
+        'pagina': pagina,
+        'limite': limite,
+        if (subcategoriaId != null) 'subcategoria_id': subcategoriaId,
+      },
     );
 
     final dados = (resposta as Map<String, dynamic>)['dados'] as List<dynamic>;

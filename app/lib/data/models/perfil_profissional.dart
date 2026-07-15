@@ -106,6 +106,15 @@ class ResumoAvaliacoes {
 class ItemPortfolio {
   final String idServico;
   final String avaliacaoId;
+  /// Especialidade contratada NESTE serviço -- ver migração 12 no backend.
+  /// É o que permite o perfil público segmentar o histórico por categoria
+  /// (ex.: mostrar só as avaliações de "Eletricista", separadas das de
+  /// "Pintor" do mesmo profissional). `null` só em raríssimos serviços
+  /// legados sem categoria alguma.
+  final int? subcategoriaId;
+  final String? subcategoriaNome;
+  final int? categoriaId;
+  final String? categoriaNome;
   final String nomeCliente;
   final String? urlFotoCliente;
   final String? comentario;
@@ -122,6 +131,10 @@ class ItemPortfolio {
   const ItemPortfolio({
     required this.idServico,
     required this.avaliacaoId,
+    required this.subcategoriaId,
+    required this.subcategoriaNome,
+    required this.categoriaId,
+    required this.categoriaNome,
     required this.nomeCliente,
     required this.urlFotoCliente,
     required this.comentario,
@@ -140,6 +153,10 @@ class ItemPortfolio {
     return ItemPortfolio(
       idServico: json['id_servico'] as String,
       avaliacaoId: json['avaliacao_id'] as String,
+      subcategoriaId: json['subcategoria_id'] as int?,
+      subcategoriaNome: json['subcategoria_nome'] as String?,
+      categoriaId: json['categoria_id'] as int?,
+      categoriaNome: json['categoria_nome'] as String?,
       nomeCliente: json['nome_cliente'] as String,
       urlFotoCliente: json['url_foto_cliente'] as String?,
       comentario: json['comentario'] as String?,

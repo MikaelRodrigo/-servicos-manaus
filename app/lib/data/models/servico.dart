@@ -74,6 +74,12 @@ class Servico {
   final String profissionalId;
   final StatusServico status;
   final String? descricao;
+  /// Especialidade contratada neste serviço -- ver migração 12 no backend.
+  /// `null` só em serviços muito antigos que nunca receberam backfill (raro).
+  final int? categoriaId;
+  final String? categoriaNome;
+  final int? subcategoriaId;
+  final String? subcategoriaNome;
   final DateTime data;
   final DateTime? dataConclusao;
   final String clienteNome;
@@ -85,6 +91,10 @@ class Servico {
     required this.profissionalId,
     required this.status,
     required this.descricao,
+    required this.categoriaId,
+    required this.categoriaNome,
+    required this.subcategoriaId,
+    required this.subcategoriaNome,
     required this.data,
     required this.dataConclusao,
     required this.clienteNome,
@@ -98,6 +108,10 @@ class Servico {
       profissionalId: json['profissional_id'] as String,
       status: StatusServico.fromApi(json['status'] as String),
       descricao: json['descricao'] as String?,
+      categoriaId: json['categoria_id'] as int?,
+      categoriaNome: json['categoria_nome'] as String?,
+      subcategoriaId: json['subcategoria_id'] as int?,
+      subcategoriaNome: json['subcategoria_nome'] as String?,
       data: DateTime.parse(json['data'] as String),
       dataConclusao: json['data_conclusao'] != null
           ? DateTime.parse(json['data_conclusao'] as String)

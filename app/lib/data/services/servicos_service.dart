@@ -10,11 +10,23 @@ class ServicosService {
 
   final _api = ApiClient.instancia;
 
-  Future<Servico> solicitar({required String profissionalId, String? descricao}) async {
+  /// `categoriaId`/`subcategoriaId` são OBRIGATÓRIOS (migração 12): o
+  /// cliente escolhe, dentre as especialidades (tags) do profissional, qual
+  /// delas está contratando -- é o que permite segmentar o histórico de
+  /// avaliações por especialidade depois. O backend recusa (400) se a
+  /// subcategoria não estiver entre as tags do profissional.
+  Future<Servico> solicitar({
+    required String profissionalId,
+    required int categoriaId,
+    required int subcategoriaId,
+    String? descricao,
+  }) async {
     final resposta = await _api.post(
       '/servicos',
       corpo: {
         'profissional_id': profissionalId,
+        'categoria_id': categoriaId,
+        'subcategoria_id': subcategoriaId,
         if (descricao != null && descricao.isNotEmpty) 'descricao': descricao,
       },
     );

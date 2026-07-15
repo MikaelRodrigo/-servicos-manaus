@@ -4,8 +4,10 @@ import {
   textoOpcional,
   statusServicoOpcional,
   numeroOpcional,
+  inteiroPositivoObrigatorio,
   entre,
   ErroDeConflito,
+  ErroDeValidacao,
   ErroNaoEncontrado,
   StatusServico,
 } from '../utils/validacao';
@@ -24,6 +26,7 @@ import {
   cancelarServicoComoCliente,
   cancelarServicoComoProfissional,
 } from '../repositories/servicos.repository';
+import { profissionalPossuiTag } from '../repositories/profissionais.repository';
 import { avaliacoesRouter } from './avaliacoes.routes';
 
 export const servicosRouter = Router();
@@ -50,7 +53,25 @@ servicosRouter.use('/:id/avaliacoes', avaliacoesRouter);
 /* ============================================================================
    POST /servicos -- o CLIENTE solicita um serviço a um profissional.
 
-   Body: { profissional_id: string (uuid), descricao?: string }
+   Body: {
+     profissional_id: string (uuid),
+     categoria_id: number,
+     subcategoria_id: number,
+     descricao?: string,
+   }
+
+   `categoria_id`/`subcategoria_id` são OBRIGATÓRIOS (migração 12): o
+   cliente escolhe, dentre as especialidades (tags) do profissional, qual
+   delas está contratando. Essa categoria fica gravada no serviço -- não
+   duplicada na avaliação depois, ela "flui" via `id_servico` (ver
+   vw_historico_portifolio). Isso é o que permite segmentar o histórico de
+   avaliações por especialidade: a nota de "Eletricista" não se mistura com
+   a de "Pintor" do mesmo profissional.
+
+   Além de existir no catálogo geral (checado pela FK composta em
+   `servicos`), a subcategoria precisa ser uma das tags do PRÓPRIO
+   profissional -- senão o cliente poderia "contratar" uma especialidade que
+   ele nem oferece.
 
    Só cliente pode criar (exigirPapel('cliente')). Um profissional não
    "solicita serviço para si mesmo" neste fluxo -- se um dia vocês quiserem
@@ -63,15 +84,33 @@ servicosRouter.post(
     try {
       const body = req.body as Record<string, unknown>;
       const profissionalId = uuidObrigatorio(body.profissional_id, 'profissional_id');
+      const categoriaId = inteiroPositivoObrigatorio(body.categoria_id, 'categoria_id');
+      const subcategoriaId = inteiroPositivoObrigatorio(body.subcategoria_id, 'subcategoria_id');
       const descricao = textoOpcional(body.descricao, 'descricao', 1000);
       const clienteId = req.usuario!.sub;
 
+      const possuiTag = await profissionalPossuiTag(profissionalId, subcategoriaId);
+      if (!possuiTag) {
+        throw new ErroDeValidacao(
+          'Esta especialidade não está entre as oferecidas por este profissional.',
+        );
+      }
+
       let servico: Servico;
       try {
-        servico = await criarServico({ clienteId, profissionalId, descricao });
+        servico = await criarServico({
+          clienteId,
+          profissionalId,
+          descricao,
+          categoriaId,
+          subcategoriaId,
+        });
       } catch (erro) {
         // profissional_id bem formado (passou no uuidObrigatorio) mas que
         // não existe na tabela `profissionais` -- o Postgres recusa a FK.
+        // (O par categoria/subcategoria já foi validado acima via
+        // profissionalPossuiTag, então uma FK violation aqui só pode ser o
+        // profissional_id.)
         if (ehErroDePostgres(erro) && erro.code === PG_FOREIGN_KEY_VIOLATION) {
           throw new ErroNaoEncontrado('Profissional não encontrado.');
         }

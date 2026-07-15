@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
+import '../data/models/categoria.dart' show TagSubcategoria;
 import '../data/models/perfil_profissional.dart';
 import '../data/models/usuario.dart';
 import '../data/services/api_client.dart';
@@ -30,6 +31,15 @@ class PerfilProfissionalScreen extends StatefulWidget {
 class _PerfilProfissionalScreenState extends State<PerfilProfissionalScreen> {
   late Future<_DadosPerfil> _futuro;
 
+  // Filtro "por categoria" do portfólio (migração 12) -- `null` = "Todas",
+  // mostra `dados.portfolio` (o histórico completo já carregado por
+  // `_carregar`). Quando uma especialidade específica é escolhida, o
+  // portfólio FILTRADO é buscado à parte (`_portfolioFiltrado`), sem
+  // recarregar perfil/resumo -- só a lista de baixo muda.
+  int? _filtroSubcategoriaId;
+  List<ItemPortfolio>? _portfolioFiltrado;
+  bool _carregandoPortfolio = false;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +65,50 @@ class _PerfilProfissionalScreenState extends State<PerfilProfissionalScreen> {
     );
   }
 
+  /// Troca o filtro "por categoria" do portfólio (migração 12).
+  /// `null` volta para "Todas" -- reaproveita a lista já carregada por
+  /// `_carregar`, sem precisar de outra chamada de rede. Qualquer
+  /// especialidade específica dispara uma busca nova, só do portfólio.
+  Future<void> _filtrarPortfolio(int? subcategoriaId) async {
+    if (subcategoriaId == null) {
+      setState(() {
+        _filtroSubcategoriaId = null;
+        _portfolioFiltrado = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _filtroSubcategoriaId = subcategoriaId;
+      _carregandoPortfolio = true;
+    });
+
+    try {
+      final portfolio = await ProfissionaisService.instancia.buscarPortfolio(
+        widget.profissionalId,
+        subcategoriaId: subcategoriaId,
+      );
+      if (!mounted) return;
+      setState(() => _portfolioFiltrado = portfolio);
+    } on ApiException catch (erro) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));
+      }
+    } finally {
+      if (mounted) setState(() => _carregandoPortfolio = false);
+    }
+  }
+
+  /// Pede a ESPECIALIDADE contratada (migração 12) além da descrição --
+  /// o cliente escolhe, dentre as tags do profissional, qual delas está
+  /// contratando. Essa categoria fica gravada no serviço e "flui" para a
+  /// avaliação depois (via id_servico), sem precisar ser informada de novo:
+  /// é o que permite segmentar o histórico de portfólio por especialidade.
+  ///
+  /// Quando o profissional só tem UMA tag, ela já vem pré-selecionada --
+  /// não faz sentido obrigar uma escolha óbvia. Com duas ou mais, o campo
+  /// nasce vazio: o cliente precisa escolher, "Solicitar" fica desabilitado
+  /// até lá.
   Future<void> _solicitarServico(PerfilProfissional perfil) async {
     final papel = context.read<AuthProvider>().usuario?.papel;
     if (papel != Papel.cliente) {
@@ -64,36 +118,76 @@ class _PerfilProfissionalScreenState extends State<PerfilProfissionalScreen> {
       return;
     }
 
+    if (perfil.subcategorias.isEmpty) {
+      // Defensivo: hoje todo profissional tem ao menos uma tag (é
+      // garantido no cadastro e na remoção de tags, ver
+      // removerTagDoProfissional no backend) -- mas se algum dia isso
+      // deixar de valer, não faz sentido abrir um diálogo sem opção
+      // nenhuma para escolher.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Este profissional ainda não tem nenhuma especialidade cadastrada.'),
+        ),
+      );
+      return;
+    }
+
     final descricaoController = TextEditingController();
+    TagSubcategoria? tagSelecionada = perfil.subcategorias.length == 1
+        ? perfil.subcategorias.first
+        : null;
+
     final confirmar = await showDialog<bool>(
       context: context,
-      builder: (contextoDialogo) => AlertDialog(
-        title: Text('Solicitar ${perfil.nomeExibicao}'),
-        content: TextField(
-          controller: descricaoController,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Descreva o serviço (opcional)',
+      builder: (contextoDialogo) => StatefulBuilder(
+        builder: (contextoDialogo, setStateDialogo) => AlertDialog(
+          title: Text('Solicitar ${perfil.nomeExibicao}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<TagSubcategoria>(
+                initialValue: tagSelecionada,
+                decoration: const InputDecoration(labelText: 'Especialidade'),
+                items: [
+                  for (final tag in perfil.subcategorias)
+                    DropdownMenuItem(value: tag, child: Text(tag.nome)),
+                ],
+                onChanged: (valor) => setStateDialogo(() => tagSelecionada = valor),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: descricaoController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Descreva o serviço (opcional)',
+                ),
+              ),
+            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(contextoDialogo).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: tagSelecionada == null
+                  ? null
+                  : () => Navigator.of(contextoDialogo).pop(true),
+              child: const Text('Solicitar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(contextoDialogo).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(contextoDialogo).pop(true),
-            child: const Text('Solicitar'),
-          ),
-        ],
       ),
     );
 
-    if (confirmar != true || !mounted) return;
+    if (confirmar != true || !mounted || tagSelecionada == null) return;
 
     try {
       await ServicosService.instancia.solicitar(
         profissionalId: perfil.id,
+        categoriaId: tagSelecionada!.categoriaId,
+        subcategoriaId: tagSelecionada!.id,
         descricao: descricaoController.text.trim(),
       );
       if (mounted) {
@@ -135,6 +229,10 @@ class _PerfilProfissionalScreenState extends State<PerfilProfissionalScreen> {
           return _ConteudoPerfil(
             dados: dados,
             aoSolicitarServico: () => _solicitarServico(dados.perfil),
+            filtroSubcategoriaId: _filtroSubcategoriaId,
+            portfolioFiltrado: _portfolioFiltrado,
+            carregandoPortfolio: _carregandoPortfolio,
+            aoTrocarFiltro: _filtrarPortfolio,
           );
         },
       ),
@@ -153,14 +251,29 @@ class _DadosPerfil {
 class _ConteudoPerfil extends StatelessWidget {
   final _DadosPerfil dados;
   final VoidCallback aoSolicitarServico;
+  /// `null` = filtro "Todas" ativo. Ver `_filtrarPortfolio` na tela.
+  final int? filtroSubcategoriaId;
+  /// Resultado da busca filtrada -- `null` enquanto o filtro é "Todas"
+  /// (nesse caso usamos `dados.portfolio`, já carregado de início).
+  final List<ItemPortfolio>? portfolioFiltrado;
+  final bool carregandoPortfolio;
+  final ValueChanged<int?> aoTrocarFiltro;
 
-  const _ConteudoPerfil({required this.dados, required this.aoSolicitarServico});
+  const _ConteudoPerfil({
+    required this.dados,
+    required this.aoSolicitarServico,
+    required this.filtroSubcategoriaId,
+    required this.portfolioFiltrado,
+    required this.carregandoPortfolio,
+    required this.aoTrocarFiltro,
+  });
 
   @override
   Widget build(BuildContext context) {
     final perfil = dados.perfil;
     final resumo = dados.resumo;
     final urlFoto = ApiConfig.urlAbsoluta(perfil.urlFotoPerfil);
+    final portfolioExibido = filtroSubcategoriaId == null ? dados.portfolio : (portfolioFiltrado ?? const []);
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -292,13 +405,54 @@ class _ConteudoPerfil extends StatelessWidget {
         ),
         const SizedBox(height: 12),
 
-        if (dados.portfolio.isEmpty)
+        // Filtro "por categoria" (migração 12) -- só faz sentido mostrar
+        // quando o profissional tem MAIS DE UMA especialidade: com uma só,
+        // "Todas" e a própria tag mostrariam exatamente o mesmo resultado.
+        if (perfil.subcategorias.length > 1) ...[
+          SizedBox(
+            height: 36,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: const Text('Todas'),
+                    selected: filtroSubcategoriaId == null,
+                    onSelected: (_) => aoTrocarFiltro(null),
+                  ),
+                ),
+                for (final tag in perfil.subcategorias)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(tag.nome),
+                      selected: filtroSubcategoriaId == tag.id,
+                      onSelected: (_) => aoTrocarFiltro(tag.id),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        if (carregandoPortfolio)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: Text('Este profissional ainda não tem histórico de portfólio.'),
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (portfolioExibido.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              filtroSubcategoriaId == null
+                  ? 'Este profissional ainda não tem histórico de portfólio.'
+                  : 'Nenhum serviço avaliado ainda nesta especialidade.',
+            ),
           )
         else
-          ...dados.portfolio.map((item) => _CartaoPortfolio(item: item)),
+          ...portfolioExibido.map((item) => _CartaoPortfolio(item: item)),
       ],
     );
   }

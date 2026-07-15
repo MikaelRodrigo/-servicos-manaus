@@ -467,6 +467,25 @@ interface LinhaTagSubcategoria {
 }
 
 /**
+ * true se `subcategoriaId` está entre as tags de especialidade do
+ * profissional -- usado por POST /servicos (servicos.routes.ts, migração
+ * 12) para impedir que um cliente "solicite" uma especialidade que aquele
+ * profissional nem oferece. Sem esta checagem, a FK composta em `servicos`
+ * só garante que o par categoria/subcategoria EXISTE no catálogo geral, não
+ * que faz sentido para ESTE profissional.
+ */
+export async function profissionalPossuiTag(
+  profissionalId: string,
+  subcategoriaId: number,
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM profissional_subcategorias WHERE profissional_id = $1 AND subcategoria_id = $2`,
+    [profissionalId, subcategoriaId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Lista as tags de especialidade de UM profissional, ordenadas por
  * categoria e depois nome -- mesma ordenação usada dentro do array
  * `subcategorias` de `buscarProximos`/`buscarPerfilPublico` acima (via

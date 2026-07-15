@@ -402,7 +402,13 @@ profissionaisRouter.get(
    fica preenchido e usamos o ID dela para marcar quais avaliações ela já
    curtiu (`curtido_por_mim` -- ver botão "Útil" em curtidas.routes.ts).
 
-   Query params: pagina (padrão 1), limite (padrão 20, máximo 100)
+   Query params:
+     pagina          (opcional) padrão 1
+     limite          (opcional) padrão 20, máximo 100
+     subcategoria_id (opcional) filtra o histórico para só uma especialidade
+                                 (migração 12) -- é o toggle "por categoria"
+                                 do perfil público. Ausente = portfólio
+                                 inteiro, todas as especialidades juntas.
    ========================================================================= */
 profissionaisRouter.get(
   '/:id/portfolio',
@@ -413,11 +419,13 @@ profissionaisRouter.get(
       const pagina = entre(numeroOpcional(req.query.pagina, 'pagina', 1), 1, 1000, 'pagina');
       const limite = entre(numeroOpcional(req.query.limite, 'limite', 20), 1, 100, 'limite');
       const offset = (pagina - 1) * limite;
+      const subcategoriaId = inteiroPositivoOpcional(req.query.subcategoria_id, 'subcategoria_id');
 
       const portfolio = await buscarPortifolio(
         profissionalId,
         { limite, offset },
         req.usuario?.sub,
+        subcategoriaId,
       );
 
       return res.json({ pagina, limite, total_retornado: portfolio.length, dados: portfolio });

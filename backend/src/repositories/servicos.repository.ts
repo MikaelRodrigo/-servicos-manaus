@@ -31,6 +31,11 @@ export interface Servico {
   profissional_id: string;
   status: StatusServico;
   descricao: string | null;
+  /** Especialidade contratada -- ver migração 12. Sempre presente em serviços novos. */
+  categoria_id: number | null;
+  categoria_nome: string | null;
+  subcategoria_id: number | null;
+  subcategoria_nome: string | null;
   data: string;
   data_conclusao: string | null;
   created_at: string;
@@ -46,6 +51,10 @@ const SELECT_SERVICO_BASE = `
     s.profissional_id,
     s.status,
     s.descricao,
+    s.categoria_id,
+    cat.nome AS categoria_nome,
+    s.subcategoria_id,
+    sub.nome AS subcategoria_nome,
     s.data,
     s.data_conclusao,
     s.created_at,
@@ -55,6 +64,8 @@ const SELECT_SERVICO_BASE = `
   FROM servicos s
   JOIN clientes c      ON c.cliente_id      = s.cliente_id
   JOIN profissionais p ON p.profissional_id = s.profissional_id
+  LEFT JOIN categorias cat    ON cat.categoria_id    = s.categoria_id
+  LEFT JOIN subcategorias sub ON sub.subcategoria_id = s.subcategoria_id
 `;
 
 /** Busca um serviço por id, já com os nomes de exibição do cliente e do profissional. */
@@ -109,6 +120,14 @@ export async function listarServicosDoProfissional(
  * DEFAULT da coluna no banco -- não precisamos (nem devemos) escrever isso
  * aqui, é o schema quem manda nessa regra.
  *
+ * `categoriaId`/`subcategoriaId` -- QUAL especialidade do profissional está
+ * sendo contratada (ver migração 12). A rota (servicos.routes.ts) exige os
+ * dois em todo serviço NOVO; aqui eles chegam sempre juntos. Se o par não
+ * bater com uma linha real de `subcategorias`, ou se a subcategoria não for
+ * de fato uma tag do profissional (ver CHECK via trigger não existente --
+ * hoje isso é validado a mais, na rota, contra `profissional_subcategorias`),
+ * o Postgres recusa com FOREIGN KEY VIOLATION.
+ *
  * Se `profissional_id` não existir, o Postgres recusa com FOREIGN KEY
  * VIOLATION (código 23503) -- é a rota (servicos.routes.ts) quem traduz
  * isso para um 404 amigável.
@@ -117,12 +136,20 @@ export async function criarServico(dados: {
   clienteId: string;
   profissionalId: string;
   descricao?: string;
+  categoriaId: number;
+  subcategoriaId: number;
 }): Promise<Servico> {
   const { rows } = await pool.query<{ id_servico: string }>(
-    `INSERT INTO servicos (cliente_id, profissional_id, descricao)
-     VALUES ($1, $2, $3)
+    `INSERT INTO servicos (cliente_id, profissional_id, descricao, categoria_id, subcategoria_id)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id_servico`,
-    [dados.clienteId, dados.profissionalId, dados.descricao ?? null],
+    [
+      dados.clienteId,
+      dados.profissionalId,
+      dados.descricao ?? null,
+      dados.categoriaId,
+      dados.subcategoriaId,
+    ],
   );
 
   // Reconsultamos para devolver também cliente_nome/profissional_nome --
