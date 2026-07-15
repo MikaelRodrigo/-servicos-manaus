@@ -8,10 +8,17 @@ class ProfissionaisProvider extends ChangeNotifier {
   List<Profissional> _resultados = [];
   bool _carregando = false;
   String? _erro;
+  // true assim que a PRIMEIRA busca terminar (sucesso ou erro) -- é o que
+  // distingue "ainda não buscamos nada" (ex.: esperando o GPS responder, tela
+  // recém-aberta) de "buscamos e não achamos ninguém". Sem isso, o mapa não
+  // teria como saber quando é seguro mostrar um estado vazio ("nenhum
+  // profissional encontrado") em vez de simplesmente não mostrar nada ainda.
+  bool _jaBuscou = false;
 
   List<Profissional> get resultados => _resultados;
   bool get carregando => _carregando;
   String? get erro => _erro;
+  bool get jaBuscou => _jaBuscou;
 
   Future<void> buscarProximos({
     required double latitude,
@@ -42,6 +49,7 @@ class ProfissionaisProvider extends ChangeNotifier {
       _erro = erro.mensagem;
     } finally {
       _carregando = false;
+      _jaBuscou = true;
       notifyListeners();
     }
   }

@@ -36,6 +36,17 @@ const _centroManaus = LatLng(-3.130130, -60.023400);
 /// ter sido levantado de 100 para 500 especificamente para esta rota.
 const _limiteDeProfissionaisNoMapa = 200;
 
+/// Saudação por horário do dia -- troca o "Olá, Nome" cru de antes por algo
+/// que reage ao momento em que a pessoa está usando o app, mesmo detalhe
+/// pequeno que apps de referência (Uber, iFood) já usam no topo da tela
+/// inicial. Puramente cosmético -- nunca influencia busca nem dado nenhum.
+String _saudacaoPorHorario() {
+  final hora = DateTime.now().hour;
+  if (hora < 12) return 'Bom dia';
+  if (hora < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
 /// não mandar o parâmetro, que já é o padrão "distancia" no backend). São os
@@ -314,6 +325,25 @@ class _MapaScreenState extends State<MapaScreen> {
     }
   }
 
+  /// Chamado pelo botão "Limpar filtros" do cartão de "nenhum resultado"
+  /// (ver `_CartaoSemResultados`) -- volta aos três filtros para o estado
+  /// neutro (sem especialidade, sem raio, ordenação por distância) e
+  /// rebusca. Existe porque a causa mais comum de "nenhum profissional
+  /// encontrado" é justamente um filtro combinado demais restritivo (raio
+  /// curto + especialidade rara), não a ausência real de profissionais na
+  /// base.
+  void _limparFiltros() {
+    setState(() {
+      _subcategoriaSelecionada = null;
+      _raioSelecionado = null;
+      _ordenacaoSelecionada = _OrdenacaoBusca.distancia;
+    });
+    final posicao = context.read<LocalizacaoProvider>().posicao;
+    if (posicao != null) {
+      _buscar(posicao.latitude, posicao.longitude);
+    }
+  }
+
   /// Toca no pino -> vai direto para o perfil público do profissional
   /// (foto, descrição, avaliações e portfólio). O pedido de serviço agora
   /// mora dentro dessa tela, não mais num bottom sheet resumido aqui.
@@ -371,9 +401,47 @@ class _MapaScreenState extends State<MapaScreen> {
       ),
     ];
 
+    final nomeUsuario = usuario?.nome.trim() ?? '';
+    final inicialUsuario = nomeUsuario.isNotEmpty ? nomeUsuario[0].toUpperCase() : '?';
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Olá, ${usuario?.nome ?? ''}'),
+        toolbarHeight: 68,
+        // Cabeçalho mais caloroso: avatar com a inicial do nome + saudação
+        // por horário do dia, em vez do "Olá, Nome" cru de antes -- mesmo
+        // espírito visual dos avatares de iniciais já usados no portfólio
+        // (`_CartaoPortfolio`) e no painel de desempenho.
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 19,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              child: Text(
+                inicialUsuario,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_saudacaoPorHorario(), style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    nomeUsuario,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
           // Só profissional tem perfil público para editar -- cliente não
           // aparece no mapa, então não tem "perfil" nesse sentido.
@@ -417,6 +485,21 @@ class _MapaScreenState extends State<MapaScreen> {
               ],
             ),
           ),
+
+          // Contagem viva do resultado -- some durante o carregamento/erro
+          // (a barra de progresso e a faixa de erro abaixo já cobrem esses
+          // casos) e some também quando a busca ainda não aconteceu.
+          // Reage a cada busca nova, sem precisar tocar em mais nada.
+          if (!profissionais.carregando &&
+              profissionais.erro == null &&
+              profissionais.resultados.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '${profissionais.resultados.length} profissional(is) encontrado(s) por perto',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
 
           // Barra principal de ordenação: só os TRÊS botões fixos pedidos
           // (requisito 1) -- "Mais próximos", "Melhor custo-benefício",
@@ -482,102 +565,129 @@ class _MapaScreenState extends State<MapaScreen> {
             const LinearProgressIndicator(minHeight: 2),
 
           Expanded(
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: posicaoAtual != null
-                    ? LatLng(posicaoAtual.latitude, posicaoAtual.longitude)
-                    : _centroManaus,
-                initialZoom: 13,
-              ),
+            child: Stack(
               children: [
-                // Camada de "ladrilhos" (as imagens do mapa em si), vindo
-                // dos servidores públicos do OpenStreetMap. `userAgentPackageName`
-                // é OBRIGATÓRIO pela política de uso do OSM -- sem ele,
-                // requests podem ser bloqueadas.
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
-                ),
-
-                // Círculo do raio de busca -- puramente visual (overlay), nunca
-                // participa da consulta em si: o filtro de verdade continua sendo
-                // o `ST_DWithin` do backend (ver profissionais.repository.ts). Este
-                // círculo só representa, na tela, a mesma "cerca" que o backend já
-                // está aplicando -- se algum dia os dois divergirem é bug de UI, não
-                // de busca.
-                //
-                // Fica ANTES do `MarkerLayer` de propósito: assim o preenchimento
-                // translúcido desenha por baixo dos pinos dos profissionais, nunca
-                // por cima escondendo-os.
-                //
-                // Sempre presente na árvore quando existe algum raio "conhecido"
-                // (`_ultimoRaioComCirculo`) -- mesmo com o toggle desligado --
-                // porque é isso que permite o `AnimatedOpacity` abaixo animar de
-                // verdade a transição de aparecer/sumir (widget removido da árvore
-                // não tem entrada/saída animada; a opacidade indo a 0 é o que
-                // simula o "removeLayer" pedido, sem tirar o widget do lugar no
-                // meio da animação).
-                if (posicaoAtual != null && _ultimoRaioComCirculo != null)
-                  AnimatedOpacity(
-                    opacity: _raioSelecionado != null ? 1 : 0,
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeInOut,
-                    // `TweenAnimationBuilder` sozinho, sem `AnimationController`
-                    // manual: ele detecta a troca de `_ultimoRaioComCirculo.km` a
-                    // cada rebuild e anima o valor atual do raio (em metros)
-                    // suavemente até o novo alvo -- é o que faz o círculo
-                    // "crescer"/"encolher" ao trocar de 2km pra 15km, em vez de
-                    // saltar de um tamanho pro outro. Ao desligar o toggle, o
-                    // valor não muda (ver comentário no campo), então só a
-                    // opacidade acima anima -- o círculo desaparece do mesmo
-                    // tamanho, sem "implodir" no processo.
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
-                      duration: const Duration(milliseconds: 450),
-                      curve: Curves.easeInOut,
-                      builder: (context, raioAnimadoEmMetros, child) {
-                        return CircleLayer(
-                          circles: [
-                            CircleMarker(
-                              point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
-                              radius: raioAnimadoEmMetros,
-                              useRadiusInMeter: true,
-                              // Preenchimento pastel e bem translúcido -- suavizado
-                              // a pedido (a versão anterior estava "agressiva"
-                              // demais): opacidade baixa o suficiente pra não
-                              // esconder os detalhes do mapa nem as fotos dos
-                              // profissionais por baixo.
-                              color: corRaio.withValues(alpha: 0.10),
-                              // Borda FINA (1.2, contra os 2 de antes) e bem mais
-                              // transparente (0.3 -- o valor pedido) que o
-                              // preenchimento, pra marcar o limite do raio sem
-                              // "gritar" na tela. `flutter_map` não tem suporte
-                              // nativo a borda tracejada em `CircleMarker` (só
-                              // `Polyline` tem `isDotted`); como o pedido permitia
-                              // "tracejada OU levemente transparente", a rota mais
-                              // simples e visualmente equivalente foi essa.
-                              borderColor: corRaio.withValues(alpha: 0.3),
-                              borderStrokeWidth: 1.2,
-                            ),
-                          ],
-                        );
-                      },
-                    ),
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: posicaoAtual != null
+                        ? LatLng(posicaoAtual.latitude, posicaoAtual.longitude)
+                        : _centroManaus,
+                    initialZoom: 13,
                   ),
+                  children: [
+                    // Camada de "ladrilhos" (as imagens do mapa em si), vindo
+                    // dos servidores públicos do OpenStreetMap. `userAgentPackageName`
+                    // é OBRIGATÓRIO pela política de uso do OSM -- sem ele,
+                    // requests podem ser bloqueadas.
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.servicosmanaus.servicos_manaus_app',
+                    ),
 
-                MarkerLayer(markers: marcadores),
-                // Créditos ao OpenStreetMap -- também exigido pela política
-                // de uso deles. Nunca remova isto de um app que usa os
-                // ladrilhos gratuitos do OSM.
-                RichAttributionWidget(
-                  attributions: [
-                    TextSourceAttribution(
-                      'OpenStreetMap contributors',
-                      onTap: () {},
+                    // Círculo do raio de busca -- puramente visual (overlay), nunca
+                    // participa da consulta em si: o filtro de verdade continua sendo
+                    // o `ST_DWithin` do backend (ver profissionais.repository.ts). Este
+                    // círculo só representa, na tela, a mesma "cerca" que o backend já
+                    // está aplicando -- se algum dia os dois divergirem é bug de UI, não
+                    // de busca.
+                    //
+                    // Fica ANTES do `MarkerLayer` de propósito: assim o preenchimento
+                    // translúcido desenha por baixo dos pinos dos profissionais, nunca
+                    // por cima escondendo-os.
+                    //
+                    // Sempre presente na árvore quando existe algum raio "conhecido"
+                    // (`_ultimoRaioComCirculo`) -- mesmo com o toggle desligado --
+                    // porque é isso que permite o `AnimatedOpacity` abaixo animar de
+                    // verdade a transição de aparecer/sumir (widget removido da árvore
+                    // não tem entrada/saída animada; a opacidade indo a 0 é o que
+                    // simula o "removeLayer" pedido, sem tirar o widget do lugar no
+                    // meio da animação).
+                    if (posicaoAtual != null && _ultimoRaioComCirculo != null)
+                      AnimatedOpacity(
+                        opacity: _raioSelecionado != null ? 1 : 0,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        // `TweenAnimationBuilder` sozinho, sem `AnimationController`
+                        // manual: ele detecta a troca de `_ultimoRaioComCirculo.km` a
+                        // cada rebuild e anima o valor atual do raio (em metros)
+                        // suavemente até o novo alvo -- é o que faz o círculo
+                        // "crescer"/"encolher" ao trocar de 2km pra 15km, em vez de
+                        // saltar de um tamanho pro outro. Ao desligar o toggle, o
+                        // valor não muda (ver comentário no campo), então só a
+                        // opacidade acima anima -- o círculo desaparece do mesmo
+                        // tamanho, sem "implodir" no processo.
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween<double>(begin: 0, end: _ultimoRaioComCirculo!.km * 1000),
+                          duration: const Duration(milliseconds: 450),
+                          curve: Curves.easeInOut,
+                          builder: (context, raioAnimadoEmMetros, child) {
+                            return CircleLayer(
+                              circles: [
+                                CircleMarker(
+                                  point: LatLng(posicaoAtual.latitude, posicaoAtual.longitude),
+                                  radius: raioAnimadoEmMetros,
+                                  useRadiusInMeter: true,
+                                  // Preenchimento pastel e bem translúcido -- suavizado
+                                  // a pedido (a versão anterior estava "agressiva"
+                                  // demais): opacidade baixa o suficiente pra não
+                                  // esconder os detalhes do mapa nem as fotos dos
+                                  // profissionais por baixo.
+                                  color: corRaio.withValues(alpha: 0.10),
+                                  // Borda FINA (1.2, contra os 2 de antes) e bem mais
+                                  // transparente (0.3 -- o valor pedido) que o
+                                  // preenchimento, pra marcar o limite do raio sem
+                                  // "gritar" na tela. `flutter_map` não tem suporte
+                                  // nativo a borda tracejada em `CircleMarker` (só
+                                  // `Polyline` tem `isDotted`); como o pedido permitia
+                                  // "tracejada OU levemente transparente", a rota mais
+                                  // simples e visualmente equivalente foi essa.
+                                  borderColor: corRaio.withValues(alpha: 0.3),
+                                  borderStrokeWidth: 1.2,
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+
+                    MarkerLayer(markers: marcadores),
+                    // Créditos ao OpenStreetMap -- também exigido pela política
+                    // de uso deles. Nunca remova isto de um app que usa os
+                    // ladrilhos gratuitos do OSM.
+                    RichAttributionWidget(
+                      attributions: [
+                        TextSourceAttribution(
+                          'OpenStreetMap contributors',
+                          onTap: () {},
+                        ),
+                      ],
                     ),
                   ],
                 ),
+
+                // Cartão flutuante de "nenhum resultado" -- só aparece
+                // quando uma busca de verdade JÁ terminou (não durante o
+                // carregamento inicial, esperando o GPS) e voltou vazia, sem
+                // erro. Antes disso o mapa simplesmente ficava sem pino
+                // nenhum, sem explicar por quê -- parecia quebrado.
+                if (!localizacao.carregando &&
+                    !profissionais.carregando &&
+                    localizacao.erro == null &&
+                    profissionais.erro == null &&
+                    profissionais.jaBuscou &&
+                    profissionais.resultados.isEmpty)
+                  Positioned(
+                    left: 24,
+                    right: 24,
+                    top: 16,
+                    child: _CartaoSemResultados(
+                      temFiltrosAtivos: _subcategoriaSelecionada != null ||
+                          _raioSelecionado != null ||
+                          _ordenacaoSelecionada != _OrdenacaoBusca.distancia,
+                      aoLimparFiltros: _limparFiltros,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -690,6 +800,64 @@ class _AvisoFaixa extends StatelessWidget {
       color: cor.withValues(alpha: 0.15),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Text(mensagem, style: TextStyle(color: cor.withValues(alpha: 1))),
+    );
+  }
+}
+
+/// Cartão flutuante mostrado sobre o mapa quando uma busca já terminou (sem
+/// erro, sem estar carregando) e voltou vazia -- ver o `if` que envolve o
+/// `Positioned` deste widget, no `build` de `_MapaScreenState`. Antes disso o
+/// mapa simplesmente ficava sem nenhum pino, sem nenhuma explicação, o que
+/// parecia bug ("sumiu tudo?") em vez de um resultado real de busca.
+///
+/// `temFiltrosAtivos` decide a MENSAGEM e se o botão "Limpar filtros"
+/// aparece: a causa mais comum de zero resultados é um filtro (raio curto,
+/// especialidade rara, ou os dois combinados) restritivo demais -- não a
+/// ausência real de profissionais cadastrados na base.
+class _CartaoSemResultados extends StatelessWidget {
+  final bool temFiltrosAtivos;
+  final VoidCallback aoLimparFiltros;
+
+  const _CartaoSemResultados({
+    required this.temFiltrosAtivos,
+    required this.aoLimparFiltros,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search_off, size: 36, color: Colors.grey.shade500),
+            const SizedBox(height: 12),
+            Text(
+              'Nenhum profissional encontrado por aqui',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              temFiltrosAtivos
+                  ? 'Tente aumentar o raio de busca ou escolher outra especialidade.'
+                  : 'Ainda não há profissionais cadastrados nesta região.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (temFiltrosAtivos) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: aoLimparFiltros,
+                icon: const Icon(Icons.filter_alt_off, size: 18),
+                label: const Text('Limpar filtros'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

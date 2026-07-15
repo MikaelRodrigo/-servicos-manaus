@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../core/theme/app_theme.dart';
 import '../data/models/usuario.dart';
 import '../providers/auth_provider.dart';
+import '../widgets/logo_app.dart';
 import 'cadastro_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -66,8 +66,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.handyman, size: 72, color: AppColors.destaque),
-                  const SizedBox(height: 8),
+                  const LogoApp(tamanho: 84),
+                  const SizedBox(height: 12),
                   Text(
                     'Serviços Manaus',
                     textAlign: TextAlign.center,

@@ -7,6 +7,7 @@ import 'providers/localizacao_provider.dart';
 import 'providers/profissionais_provider.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
+import 'widgets/logo_app.dart';
 
 void main() {
   runApp(const ServicosManausApp());
@@ -64,7 +65,30 @@ class _PortaDeEntrada extends StatelessWidget {
 
     switch (status) {
       case StatusAuth.carregando:
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        // Splash de verdade em vez de um spinner sozinho no branco -- é a
+        // PRIMEIRA coisa que qualquer pessoa vê ao abrir o app, antes até de
+        // saber se ela vai cair no login ou já direto na área logada. Usa a
+        // mesma marca (`LogoApp`) da tela de login, pra não ter dois visuais
+        // diferentes de "abertura" no mesmo app.
+        return Scaffold(
+          backgroundColor: AppColors.fundo,
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const LogoApp(),
+                const SizedBox(height: 20),
+                Text('Serviços Manaus', style: Theme.of(context).textTheme.headlineSmall),
+                const SizedBox(height: 28),
+                const SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+              ],
+            ),
+          ),
+        );
       case StatusAuth.autenticado:
         return const HomeShell();
       case StatusAuth.naoAutenticado:
