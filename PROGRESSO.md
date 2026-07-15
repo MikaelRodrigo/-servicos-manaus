@@ -1022,3 +1022,40 @@ Usuário mandou um print da tela inicial (mapa) mostrando o avatar de iniciais r
 3. Testar de verdade a foto no cabeçalho: logar com um usuário que já tem `url_foto_perfil` preenchida e conferir que aparece; trocar a foto em "Editar perfil"/"Meu perfil" e conferir que o avatar do mapa muda sem precisar deslogar.
 4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
 5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações; testar o fluxo completo de solicitar serviço com especialidade; testar o painel de desempenho com dados reais; testar a "interface mais viva" da sessão anterior (splash/login com logo animada, cartão de "nenhum resultado").
+
+---
+
+## Sessão de 15/07/2026 (continuação 5) — Redesign da tela inicial e navegação
+
+### Pedido
+Usuário mandou um print de referência (mockup estilo Uber Eats: cabeçalho curvo teal com avatar+saudação, cartão de mapa com pinos circulares, barra de busca em pill "Buscar especialidade", chips de ordenação/raio, grade de categorias com foto/nota/botão, navegação inferior Food/Entrega/Pay) e pediu, verbatim: "Precisamos modificar a interface do app. você vai colocar nessas mesma dimensões e local no app, isso serve para a posição dos filtros tmb, as especialidades classes devem respeitar também esse formato de charges, nesse campo de navegação em baixo, preciso que você insira um menu com os objetos que já tenho no sistema, ex: Home, meus dados, clientes, solicitações etc.. Seja criativo, me surpreenda."
+
+Ou seja: reproduzir as dimensões/posições do mockup (cabeçalho, mapa, busca, filtros), aplicar o mesmo formato de cartão às categorias, e trocar a navegação inferior fake (Food/Entrega/Pay) por itens REAIS do sistema -- com liberdade criativa explícita.
+
+### Decisões de design (sem dado inventado)
+- Categorias/subcategorias não têm campo de imagem no backend -- cartões usam ícone (`_iconeParaCategoria`, por palavra-chave no nome) em vez de foto de banco de imagens.
+- Em vez de nota/estrela fake, cada cartão mostra a contagem REAL de profissionais (soma de `Subcategoria.totalProfissionais`, já calculada pelo backend).
+- "Meus Clientes" (item novo na navegação, só para profissional) não tem endpoint próprio -- é construído 100% client-side agrupando `GET /servicos/meus` (o mesmo que já alimenta "Solicitações") por `clienteId`. Zero chamada de rede nova, zero dado inventado.
+
+### O que foi feito
+- **`widgets/avatar_iniciais.dart`** (novo): `AvatarIniciais` extraído como widget compartilhado (cabeçalho do mapa, lista de clientes), fundo puxado do tema.
+- **`mapa_screen.dart`** (reescrita grande): cabeçalho curvo (`Stack` + `Clip.none`) com avatar/foto real + saudação por horário; cartão de mapa branco "flutuando" sobre a borda inferior do cabeçalho (`Positioned`, sobreposição de 36px); barra de busca em pill branco reaproveitando `BuscaSubcategoriaAutocomplete` (via `Theme` local zerando a decoração padrão); chips de ordenação/raio mantidos na mesma posição de antes; grade "Explore por especialidade" com `_CartaoCategoria` (ícone + nome + contagem real + chevron), abrindo um bottom sheet de subcategorias ao tocar.
+- **`meus_clientes_screen.dart`** (nova tela): agrupa serviços por cliente, mostra total/concluídos/última atividade, toque abre `ServicosScreen` filtrada.
+- **`servicos_screen.dart`**: ganhou `filtroClienteId`/`tituloPersonalizado` opcionais para dar suporte ao drill-down acima, sem duplicar a tela de lista.
+- **`home_shell.dart`** (navegação inferior reorganizada): Home / Solicitações / Clientes (só profissional) / Meus dados -- "Meus dados" aponta para `EditarPerfilScreen` (profissional) ou `PerfilClienteScreen` (cliente), dando à edição de perfil do profissional um lugar fixo na navegação (antes só um ícone de lápis escondido no AppBar do mapa).
+- **`editar_perfil_screen.dart`**: bug pego proativamente -- a tela agora também vive como aba fixa (não empilhada) dentro do `HomeShell`, então o `Navigator.pop()` incondicional do `_salvar()` foi trocado por uma checagem `canPop()` (senão poderia fechar a tela errada quando usada como aba).
+
+### Verificação feita
+- Balanceamento de `(`/`{`/`[`/`}`/`)`/`]` via script Python nos 6 arquivos tocados: todos batendo.
+- Mount bash truncado (mesmo bug recorrente de sempre) em todos os 6; reescritos via heredoc + `tr -d '\000'`, linha por linha conferida contra o conteúdo do lado Windows.
+- `git diff` completo revisado (não só `--stat`): mudanças nos pontos esperados, nenhuma deleção acidental; conferido por `grep` que todos os campos/métodos referenciados no novo `mapa_screen.dart` (`urlFotoPerfil`, `clienteId`/`clienteNome`, `listarMeus`, parâmetros de `buscarProximos`, `AppColors`/`AppRadius`) realmente existem nos models/services/providers/tema.
+- Nenhum arquivo de backend tocado nesta sessão -- `tsc` não se aplica.
+- Commit `aa5a933` criado.
+- **Não testado nesta sessão**: rodar o app de verdade para ver o layout novo (cabeçalho curvo, cartão de mapa sobreposto, grade de categorias, navegação inferior) em tela real -- não há como renderizar/tirar print de um build Flutter neste ambiente.
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` para enviar todos os commits pendentes (agora incluindo `aa5a933`).
+2. Rodar as migrações 11 e 12 no Neon (ainda não confirmado que rodaram).
+3. Testar de verdade o redesign: abrir o app, conferir o cabeçalho curvo + cartão de mapa sobreposto em tela pequena/grande, tocar num cartão de categoria (bottom sheet de especialidades), navegar pela nova barra inferior (Home/Solicitações/Clientes/Meus dados) como cliente e como profissional.
+4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; testar o fluxo completo de solicitar serviço com especialidade; testar o painel de desempenho com dados reais; testar a "interface mais viva" e a foto no cabeçalho das sessões anteriores.
