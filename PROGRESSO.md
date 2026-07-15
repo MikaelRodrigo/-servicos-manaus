@@ -884,3 +884,42 @@ Para não arriscar o fluxo de cadastro já testado, o cadastro (`auth.routes.ts`
 3. Testar de verdade no Flutter: adicionar 2+ tags a um profissional, remover uma, tentar remover a última (deve recusar com a mensagem do backend), e confirmar que ele aparece na busca do mapa filtrando por QUALQUER uma das tags.
 4. Itens restantes da lista original de 7 pedidos: galeria de portfólio, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
 5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações.
+
+---
+
+## Sessão de 15/07/2026 (continuação) — Histórico de avaliações por especialidade
+
+### Pedido
+Usuário colou uma especificação de negócio pronta ("Sistema de Histórico por Especialidade"): profissionais com várias especialidades (o sistema de tags construído mais cedo nesta mesma sessão) devem ter a REPUTAÇÃO segmentada por categoria — um cliente decidindo contratar um "Eletricista" deveria ver as notas de eletricista, não uma média borrada com as notas de "Pintor" do mesmo profissional. Fechamento do pedido: "Eu copiei isso do chat, siga o que vc acha melhor, mas tenda base nessa ideia" — delegação explícita de decisão de design.
+
+### Decisão de design
+A categoria não é capturada na AVALIAÇÃO (isso duplicaria dado e poderia divergir da tag real do serviço) — é capturada no SERVIÇO, no momento em que o cliente solicita: ele escolhe, dentre as tags do profissional, qual especialidade está contratando. A avaliação, criada depois a partir desse mesmo serviço (`id_servico`), herda a categoria automaticamente via JOIN — sem gravar a categoria de novo em `avaliacoes_profissional`. Mesmo espírito de "nunca duplicar o que já dá pra buscar via JOIN" usado no resto do schema.
+
+### O que foi feito
+- `database/12_categoria_servico_avaliacao.sql` (nova migração): `servicos` ganha `categoria_id`/`subcategoria_id` (nullable, FK composta contra `subcategorias(subcategoria_id, categoria_id)`, CHECK "ambos ou nenhum", índice inverso por subcategoria_id); backfill dos serviços existentes a partir da categoria/subcategoria PRINCIPAL do profissional que prestou o serviço; `vw_historico_portifolio` recriada (`DROP` + `CREATE`, convenção do projeto) expondo `subcategoria_id`/`subcategoria_nome`/`categoria_id`/`categoria_nome` de cada item.
+- Backend:
+  - `servicos.repository.ts`: `Servico` ganha os 4 campos de categoria; `SELECT_SERVICO_BASE` faz LEFT JOIN com `categorias`/`subcategorias`; `criarServico` agora exige `categoriaId`/`subcategoriaId` no INSERT.
+  - `profissionais.repository.ts`: nova função `profissionalPossuiTag(profissionalId, subcategoriaId)` — usada para impedir que um cliente "contrate" uma especialidade que o profissional não oferece.
+  - `servicos.routes.ts`: `POST /servicos` agora exige `categoria_id`/`subcategoria_id` no body (`inteiroPositivoObrigatorio`) e valida via `profissionalPossuiTag` antes de criar o serviço (`ErroDeValidacao` se a tag não pertence ao profissional).
+  - `avaliacoes.repository.ts`: `ItemDePortfolio` ganha os 4 campos de categoria; `buscarPortifolio` aceita um `subcategoriaId` opcional que filtra `WHERE v.subcategoria_id = $5`.
+  - `profissionais.routes.ts`: `GET /profissionais/:id/portfolio` aceita `?subcategoria_id=` (opcional, `inteiroPositivoOpcional`) e repassa para `buscarPortifolio`.
+- Flutter:
+  - `servico.dart`: `Servico` ganha os 4 campos de categoria.
+  - `perfil_profissional.dart`: `ItemPortfolio` ganha os 4 campos de categoria.
+  - `servicos_service.dart`: `ServicosService.solicitar` agora exige `categoriaId`/`subcategoriaId`.
+  - `profissionais_service.dart`: `ProfissionaisService.buscarPortfolio` aceita `subcategoriaId` opcional.
+  - `perfil_profissional_screen.dart`: o diálogo "Solicitar serviço" ganhou um `DropdownButtonFormField` de especialidade (pré-selecionado quando o profissional só tem uma tag; obrigatório escolher quando tem mais de uma — botão "Solicitar" fica desabilitado até lá); a lista de portfólio ganhou um filtro por categoria (`ChoiceChip`s "Todas" + uma por tag, só aparece quando o profissional tem mais de uma especialidade) — trocar o filtro busca o portfólio filtrado via nova chamada, sem recarregar perfil/resumo.
+
+### Verificação feita
+- `npx tsc --noEmit` no backend: limpo.
+- Balanceamento de `(`/`{`/`[`/`}`/`)`/`]` checado via script Python nos 5 arquivos Dart tocados: todos batendo.
+- **Bug de truncamento do mount reapareceu de novo nesta sessão** (mesma classe de bug documentada na entrada anterior): todos os 5 arquivos de backend e todos os 5 arquivos Flutter tocados via `Edit` apareceram com MENOS linhas no mount bash do que no lado Windows (staleness/truncamento, não só atraso de alguns segundos). Mitigação aplicada consistentemente desta vez: depois de cada edição relevante, `wc -l` do lado mount comparado com o número de linhas esperado (visto no `Read` do lado Windows); qualquer divergência disparou reescrita COMPLETA do arquivo via heredoc (`cat > arquivo << 'DELIMITADOR_UNICO'`), em pedaços para os arquivos grandes (`profissionais.repository.ts`, `profissionais.routes.ts`, `perfil_profissional_screen.dart`), sempre conferindo o número de linhas de cada pedaço contra o Read original antes de seguir para o próximo. `git diff` completo (não só `--stat`) revisado ao final — sem deleções inesperadas em nenhum arquivo.
+- Commit `f6676d2` criado com sucesso.
+- **Não testado nesta sessão**: fluxo real no emulador/dispositivo (solicitar serviço escolhendo uma especialidade específica, ver a avaliação subsequente herdar essa categoria no portfólio, alternar o filtro de categoria no perfil público).
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` na própria máquina para enviar todos os commits pendentes (`1ba0900`, `6596717`, `fba20d3`, `c67a83f`, `f6676d2`) — sandbox sem rede para o GitHub.
+2. Rodar as migrações 11 e 12 no Neon (mesmo processo de sempre: SQL Editor, conferir os `RAISE NOTICE` de verificação ao final de cada uma).
+3. Testar de verdade no Flutter: solicitar um serviço escolhendo uma especialidade específica (profissional com 2+ tags), completar o ciclo até avaliação, confirmar que ela aparece no portfólio já com a categoria certa, e que o filtro "por categoria" do perfil público separa corretamente as avaliações de cada especialidade.
+4. Itens restantes da lista original de 7 pedidos: galeria de portfólio manual, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações.
