@@ -250,6 +250,12 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
         _enderecoPreview = null;
         _erroCep = null;
       });
+      // Reflete a foto nova no avatar do cabeçalho do mapa na hora, sem
+      // precisar deslogar/logar de novo -- ver comentário em
+      // `AuthProvider.atualizarFotoPerfil`.
+      if (_fotoEscolhida != null) {
+        await context.read<AuthProvider>().atualizarFotoPerfil(perfilAtualizado.urlFotoPerfil);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

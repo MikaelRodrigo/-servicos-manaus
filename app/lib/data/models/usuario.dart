@@ -30,12 +30,18 @@ class Usuario {
   final String email;
   final String nome;
   final Papel papel;
+  /// Foto de perfil (cliente ou profissional) -- mesma coluna `url_foto_perfil`
+  /// nas duas tabelas do backend. `null` até a pessoa editar o perfil e
+  /// enviar uma foto pela primeira vez; nesse caso a tela inicial cai no
+  /// fallback de inicial do nome (ver `mapa_screen.dart`).
+  final String? urlFotoPerfil;
 
   const Usuario({
     required this.id,
     required this.email,
     required this.nome,
     required this.papel,
+    this.urlFotoPerfil,
   });
 
   factory Usuario.fromJson(Map<String, dynamic> json, Papel papel) {
@@ -44,6 +50,7 @@ class Usuario {
       email: json['email'] as String,
       nome: json['nome'] as String,
       papel: papel,
+      urlFotoPerfil: json['url_foto_perfil'] as String?,
     );
   }
 
@@ -57,6 +64,20 @@ class Usuario {
       email: json['email'] as String,
       nome: json['nome'] as String,
       papel: PapelJson.fromApi(json['papel'] as String),
+      urlFotoPerfil: json['url_foto_perfil'] as String?,
+    );
+  }
+
+  /// Usado pelo `AuthProvider` para refletir na hora uma foto nova salva em
+  /// `EditarPerfilScreen`/`PerfilClienteScreen`, sem precisar deslogar e
+  /// logar de novo para a tela inicial atualizar o avatar.
+  Usuario copiarCom({String? urlFotoPerfil}) {
+    return Usuario(
+      id: id,
+      email: email,
+      nome: nome,
+      papel: papel,
+      urlFotoPerfil: urlFotoPerfil ?? this.urlFotoPerfil,
     );
   }
 
@@ -65,6 +86,7 @@ class Usuario {
         'email': email,
         'nome': nome,
         'papel': papel.valorApi,
+        'url_foto_perfil': urlFotoPerfil,
       };
 }
 

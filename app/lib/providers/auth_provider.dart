@@ -95,4 +95,18 @@ class AuthProvider extends ChangeNotifier {
     _erro = null;
     notifyListeners();
   }
+
+  /// Atualiza só a foto de perfil da pessoa logada -- chamado por
+  /// `EditarPerfilScreen` (profissional) e `PerfilClienteScreen` (cliente)
+  /// logo depois de salvar uma foto nova, para a tela inicial (avatar no
+  /// cabeçalho do mapa) refletir a mudança na hora, sem precisar deslogar e
+  /// logar de novo. Também persiste no `flutter_secure_storage`, senão a
+  /// foto "voltaria" à antiga na próxima vez que o app abrir e
+  /// `_restaurarSessao` reler o usuário salvo.
+  Future<void> atualizarFotoPerfil(String? urlFotoPerfil) async {
+    if (_usuario == null) return;
+    _usuario = _usuario!.copiarCom(urlFotoPerfil: urlFotoPerfil);
+    await ArmazenamentoToken.instancia.salvarUsuario(_usuario!.toJson());
+    notifyListeners();
+  }
 }

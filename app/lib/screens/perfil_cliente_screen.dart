@@ -1,10 +1,12 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
 import '../data/models/perfil_cliente.dart';
 import '../data/services/api_client.dart';
 import '../data/services/clientes_service.dart';
+import '../providers/auth_provider.dart';
 import '../widgets/selecao_foto_perfil.dart';
 
 /// Tela de perfil do PRÓPRIO cliente: mostra foto, nome, e-mail (dados
@@ -91,11 +93,18 @@ class _PerfilClienteScreenState extends State<PerfilClienteScreen> {
         foto: _fotoEscolhida,
       );
       if (!mounted) return;
+      final fotoMudou = _fotoEscolhida != null;
       setState(() {
         _perfilCarregado = perfilAtualizado;
         _fotoEscolhida = null;
         _bytesFotoEscolhida = null;
       });
+      // Reflete a foto nova no avatar do cabeçalho do mapa na hora, sem
+      // precisar deslogar/logar de novo -- ver comentário em
+      // `AuthProvider.atualizarFotoPerfil`.
+      if (fotoMudou) {
+        await context.read<AuthProvider>().atualizarFotoPerfil(perfilAtualizado.urlFotoPerfil);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Perfil atualizado!')),
       );

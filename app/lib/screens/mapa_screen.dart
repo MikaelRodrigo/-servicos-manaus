@@ -403,6 +403,7 @@ class _MapaScreenState extends State<MapaScreen> {
 
     final nomeUsuario = usuario?.nome.trim() ?? '';
     final inicialUsuario = nomeUsuario.isNotEmpty ? nomeUsuario[0].toUpperCase() : '?';
+    final urlFotoUsuario = ApiConfig.urlAbsoluta(usuario?.urlFotoPerfil);
 
     return Scaffold(
       appBar: AppBar(
@@ -413,15 +414,22 @@ class _MapaScreenState extends State<MapaScreen> {
         // (`_CartaoPortfolio`) e no painel de desempenho.
         title: Row(
           children: [
-            CircleAvatar(
-              radius: 19,
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              child: Text(
-                inicialUsuario,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                ),
+            // Foto de perfil de verdade quando existe (cliente ou
+            // profissional -- ambos podem cadastrar uma em suas telas de
+            // editar perfil); cai na inicial do nome, do mesmo jeito que o
+            // resto do app (ver `_IconeFallback` no marcador do mapa),
+            // quando não há foto ou a imagem falha ao carregar.
+            ClipOval(
+              child: SizedBox(
+                width: 38,
+                height: 38,
+                child: urlFotoUsuario != null
+                    ? Image.network(
+                        urlFotoUsuario,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _AvatarIniciais(inicial: inicialUsuario),
+                      )
+                    : _AvatarIniciais(inicial: inicialUsuario),
               ),
             ),
             const SizedBox(width: 12),
@@ -785,6 +793,32 @@ class _TrianguloPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _TrianguloPainter oldDelegate) => false;
+}
+
+/// Fallback do avatar do cabeçalho quando a pessoa logada ainda não tem foto
+/// de perfil (ou a foto falha ao carregar) -- um círculo colorido com a
+/// inicial do nome, mesmo espírito visual de `_IconeFallback` (marcador do
+/// mapa) e dos avatares de iniciais já usados no portfólio/painel de
+/// desempenho.
+class _AvatarIniciais extends StatelessWidget {
+  final String inicial;
+
+  const _AvatarIniciais({required this.inicial});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      alignment: Alignment.center,
+      child: Text(
+        inicial,
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Theme.of(context).colorScheme.onPrimaryContainer,
+        ),
+      ),
+    );
+  }
 }
 
 class _AvisoFaixa extends StatelessWidget {

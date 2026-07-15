@@ -18,6 +18,12 @@ export interface UsuarioAutenticavel {
   email: string;
   senha_hash: string;
   nome_exibicao: string;
+  /** Foto de perfil (cliente ou profissional) -- mesma coluna `url_foto_perfil`
+   * nas duas tabelas (ver migrações 04 e 06). `null` até a pessoa editar o
+   * perfil e enviar uma foto pela primeira vez. Incluída aqui para que a
+   * tela inicial do app já mostre a foto assim que a pessoa loga, sem
+   * precisar de uma chamada extra à API. */
+  url_foto_perfil: string | null;
 }
 
 /**
@@ -34,7 +40,8 @@ export { PG_UNIQUE_VIOLATION } from '../utils/erros-postgres';
 
 export async function buscarClientePorEmail(email: string): Promise<UsuarioAutenticavel | null> {
   const { rows } = await pool.query<UsuarioAutenticavel>(
-    `SELECT cliente_id AS id, email, senha_hash, COALESCE(nome, razao_social) AS nome_exibicao
+    `SELECT cliente_id AS id, email, senha_hash, COALESCE(nome, razao_social) AS nome_exibicao,
+            url_foto_perfil
        FROM clientes
       WHERE email = $1`,
     [email],
@@ -46,7 +53,8 @@ export async function buscarProfissionalPorEmail(
   email: string,
 ): Promise<UsuarioAutenticavel | null> {
   const { rows } = await pool.query<UsuarioAutenticavel>(
-    `SELECT profissional_id AS id, email, senha_hash, COALESCE(nome, razao_social) AS nome_exibicao
+    `SELECT profissional_id AS id, email, senha_hash, COALESCE(nome, razao_social) AS nome_exibicao,
+            url_foto_perfil
        FROM profissionais
       WHERE email = $1`,
     [email],

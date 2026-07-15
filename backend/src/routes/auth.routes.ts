@@ -239,7 +239,12 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     return res.json({
       token,
       papel,
-      usuario: { id: usuario.id, email: usuario.email, nome: usuario.nome_exibicao },
+      usuario: {
+        id: usuario.id,
+        email: usuario.email,
+        nome: usuario.nome_exibicao,
+        url_foto_perfil: usuario.url_foto_perfil,
+      },
     });
   } catch (erro) {
     return next(erro);
