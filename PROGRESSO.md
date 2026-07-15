@@ -807,3 +807,42 @@ As Seções 1-2 (INSERT da categoria/subcategoria "Outros", com `ON CONFLICT DO 
 1. Conferir a saída do `RAISE NOTICE` da migração 10 (ou rodar `database/_diagnostico_migracoes_pendentes.sql` de novo — `profissionais_sem_categoria` deve estar em `0`).
 2. Testar de verdade no Flutter: filtrar por uma especialidade no mapa e confirmar que os profissionais antigos (os 3 que estavam sem categoria) aparecem normalmente.
 3. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo ("Diego"/"Patrícia") num ambiente real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações; rodar `npm install`/`tsc --noEmit` com as dependências S3 numa máquina com rede; validar upload real com as credenciais S3/R2 do colaborador.
+
+---
+
+## Sessão de 14/07/2026 — S3/R2 local + autofill de CEP em tempo real
+
+### Pedido
+Duas frentes: (1) destravar o backend local do usuário, que parou de subir depois do merge (dependências novas do colaborador); (2) implementar o primeiro item de uma lista de 7 pedidos de UX no perfil do profissional ("Passo a Passo de Implementação — Perfil e Raio de Atendimento"), priorizado explicitamente pelo usuário: autofill em tempo real do endereço ao digitar o CEP, e **não** construir o seletor de raio de atendimento.
+
+### Backend local: `ts-node-dev` não encontrado + variável S3 ausente
+- `npm run dev` falhava com `'ts-node-dev' não é reconhecido...` — `node_modules` local estava desatualizado em relação ao merge (que trouxe `multer-s3`/AWS SDK do colaborador). Corrigido com `npm install`.
+- Em seguida, `[env] Variavel de ambiente obrigatoria ausente: S3_ENDPOINT` — o `env.ts` do colaborador exige config S3 mesmo em desenvolvimento, e o `.env` local do usuário é anterior ao merge. Usuário recuperou as credenciais do bucket R2 (`servicos-manaus-uploads`) de uma sessão anterior; adicionei ao `backend/.env` local (gitignored) `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Para `S3_PUBLIC_URL_BASE` houve confusão inicial (usuário considerou reusar o `S3_ENDPOINT`) — expliquei a diferença (endpoint privado assinado x "Public Development URL" do R2, subdomínio `.r2.dev` público) e o usuário achou o valor certo no painel da Cloudflare.
+- **Pendente**: usuário ainda não confirmou que o `npm run dev` sobe limpo depois dessas duas correções, nem testou upload/carregamento de imagem via R2 (CORS Policy do bucket é o próximo suspeito de bloqueio, se acontecer).
+
+### Autofill de CEP em tempo real — decisão sobre o raio de atendimento
+Pedido original incluía um Slider de "raio de atendimento" para o profissional configurar. Combinado com o usuário: **não implementar** — em vez disso, a localização do profissional (derivada do CEP) já aparece para os clientes de forma **aproximada**, não exata, então não há necessidade de o profissional se preocupar em configurar um raio próprio. Essa reafirmação foi comunicada ao usuário na conversa; não exigiu mudança de código (o comportamento de mostrar posição aproximada já é assim, via a geocodificação existente).
+
+### O que foi feito
+- `backend/src/services/cep.ts`: `buscarEnderecoPorCep` (e a interface `RespostaViaCep`) passaram a ser exportadas — é só a etapa rápida do ViaCEP (endereço, sem geocodificar), que já existia internamente para alimentar `buscarLocalizacaoPorCep`.
+- `backend/src/routes/cep.routes.ts` (novo): rota pública `GET /cep/:cep`, reaproveitando `buscarEnderecoPorCep` — devolve `{ logradouro, bairro, cidade, uf }`. Não faz geocodificação (isso só acontece de verdade em `PATCH /profissionais/me`, ao salvar).
+- `backend/src/app.ts`: registra `app.use('/cep', cepRouter)`.
+- `app/lib/data/models/endereco_cep.dart` (novo): `EnderecoPorCep` (campos nullable) + getter `textoFormatado`.
+- `app/lib/data/services/cep_service.dart` (novo): `CepService.buscarEndereco(cep)` chamando `GET /cep/:cep` sem autenticação.
+- `app/lib/screens/editar_perfil_screen.dart`: campo de CEP ganhou `onChanged` com debounce de 500ms (`Timer`, cancela/reinicia a cada tecla, só dispara com os 8 dígitos completos); enquanto consulta, mostra um spinner pequeno dentro do próprio campo (`suffixIcon`); ao responder, mostra abaixo do campo uma prévia do endereço encontrado (ícone + texto, cor primária) ou uma mensagem de erro (CEP inexistente, cor de erro) — tudo antes mesmo de salvar. Guarda contra resposta desatualizada (se o usuário já mudou o CEP de novo enquanto a consulta antiga ainda estava em voo, ela é descartada). Ao salvar com sucesso, a prévia/erro são limpos junto com o campo.
+- Confirmado en passant: o botão "Salvar perfil" dessa tela **já tinha** spinner de carregamento (`_salvando`) de uma sessão anterior — um dos 7 itens pedidos já estava pronto, sem necessidade de trabalho novo.
+
+### Verificação feita
+- `git diff --stat` conferido: só os 6 arquivos esperados (3 novos, 3 modificados).
+- `npx tsc --noEmit` no backend: limpo, sem erros.
+- Checagem de balanceamento de `(`/`{`/`[` nos 3 arquivos Dart tocados: todos zerados (sem chave/parêntese sobrando).
+- Commit `1ba0900` criado com sucesso diretamente no mount (sem precisar do workaround de `/tmp` + repack desta vez).
+- **Não verificado nesta sessão**: `flutter analyze`/build real (sandbox não tem Flutter instalado) — a tela não foi rodada num emulador/dispositivo.
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` na própria máquina (sandbox sem rede para o GitHub) para enviar o commit `1ba0900`.
+2. Confirmar que `npm run dev` sobe limpo localmente após `npm install` + `.env` com credenciais S3/R2; testar upload/exibição de imagem via R2 (CORS é suspeito nº 1 se travar).
+3. Testar o autofill de CEP de verdade num emulador/dispositivo (digitar um CEP válido e um inválido, conferir debounce/spinner/preview/erro).
+4. Retomar com o usuário a definição do sistema de tags de categoria (múltiplas especialidades) — ainda em aberto se as tags devem alimentar busca/filtro (mudança maior de schema N:N) ou ser só informativas (mudança menor, aditiva).
+5. Itens restantes da lista original de 7 pedidos, ainda não iniciados: galeria de portfólio (upload manual de fotos, independente de avaliações), selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+6. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo ("Diego"/"Patrícia") num ambiente real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
