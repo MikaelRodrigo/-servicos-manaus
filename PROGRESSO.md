@@ -846,3 +846,41 @@ Pedido original incluía um Slider de "raio de atendimento" para o profissional 
 4. Retomar com o usuário a definição do sistema de tags de categoria (múltiplas especialidades) — ainda em aberto se as tags devem alimentar busca/filtro (mudança maior de schema N:N) ou ser só informativas (mudança menor, aditiva).
 5. Itens restantes da lista original de 7 pedidos, ainda não iniciados: galeria de portfólio (upload manual de fotos, independente de avaliações), selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
 6. Itens antigos ainda pendentes: testar o cenário do bug de raio cumulativo ("Diego"/"Patrícia") num ambiente real; investigar build "Windows (desktop)"; confirmar fix do cropper.js no Web; considerar migração para critério real de "pontualidade" nas avaliações.
+
+---
+
+## Sessão de 15/07/2026 — Sistema de tags de especialidade (N:N)
+
+### Pedido
+Retomar o item deixado em aberto na sessão anterior: substituir a categoria/subcategoria ÚNICA do profissional por um sistema de múltiplas "tags" de especialidade. Esclarecido com o usuário via perguntas: (1) as tags DEVEM alimentar busca/filtro (profissional aparece na busca de qualquer uma delas, não só da principal); (2) UX confirmada pelo usuário — input "Adicionar Categoria": digita, confirma (Enter/toque), vira um box removível abaixo, campo limpa e continua pronto para a próxima. Usuário também mandou um passo a passo técnico (estado em lista, componente de box com "x", fade-in ao adicionar, campo sempre visível, remoção imediata) — incorporado ao widget.
+
+### Decisão de escopo
+Para não arriscar o fluxo de cadastro já testado, o cadastro (`auth.routes.ts`) continua exigindo 1 categoria/subcategoria obrigatória, como antes — só que agora essa escolha vira automaticamente a PRIMEIRA tag do profissional (inserida atomicamente via `WITH` na mesma query do INSERT). A tela de EDITAR PERFIL é onde o profissional gerencia tags extras (adicionar/remover livremente, sempre mantendo ao menos uma).
+
+### O que foi feito
+- `database/11_tags_subcategorias_profissional.sql` (nova migração): tabela `profissional_subcategorias` (PK composta profissional_id+subcategoria_id, FK para as duas tabelas), índice inverso por subcategoria_id, backfill a partir da coluna única existente.
+- `backend/src/repositories/profissionais.repository.ts`: fragmento SQL reaproveitado (`SQL_TAGS_SUBCATEGORIAS`, LATERAL + json_agg) que agrega todas as tags de um profissional, usado em `buscarProximos`, `buscarPerfilPublico` e `atualizarPerfilProfissional`. O filtro exato de subcategoria em `buscarProximos` trocou de comparação direta na coluna única para `EXISTS` na tabela de junção. Três funções novas: `listarTagsDoProfissional`, `adicionarTagAoProfissional` (idempotente via `ON CONFLICT DO NOTHING`), `removerTagDoProfissional` (recusa remover a última tag).
+- `backend/src/routes/profissionais.routes.ts`: `GET/POST/DELETE /profissionais/me/subcategorias`.
+- `backend/src/repositories/auth.repository.ts`: `criarProfissionalPF`/`PJ` agora usam `WITH novo AS (INSERT ... RETURNING ...) INSERT INTO profissional_subcategorias ...` — a tag inicial é gravada atomicamente junto com o cadastro.
+- `app/lib/data/models/categoria.dart`: nova classe `TagSubcategoria` (id, nome, categoriaId, categoriaNome).
+- `app/lib/data/models/perfil_profissional.dart`: campo `subcategorias: List<TagSubcategoria>`.
+- `app/lib/data/services/api_client.dart`: método `delete()`.
+- `app/lib/data/services/profissionais_service.dart`: `adicionarTag`/`removerTag`.
+- `app/lib/widgets/selecao_tags_subcategorias.dart` (novo): chips removíveis com fade-in (`TweenAnimationBuilder`, só anima tags novas via `ValueKey`), campo de busca sempre visível (reaproveita o padrão de normalização/busca do `BuscaSubcategoriaAutocomplete`), Enter confirma a primeira sugestão, toque no dropdown confirma a escolhida.
+- `app/lib/screens/editar_perfil_screen.dart`: removido o `SeletorCategoriaCascata` (troca de categoria única); adicionado `SelecaoTagsSubcategorias`. Tags são adicionadas/removidas NA HORA (chamada de API imediata), não fazem parte do "Salvar perfil" em lote.
+- `app/lib/screens/perfil_profissional_screen.dart`: o texto único "atuação (categoria)" virou uma `Wrap` de chips com todas as especialidades, com fallback pro texto antigo se a lista vier vazia.
+
+### Verificação feita
+- `npx tsc --noEmit` no backend: limpo.
+- Balanceamento de `(`/`{`/`[` nos 7 arquivos Dart tocados: todos zerados.
+- `git diff --stat` conferido: exatamente os 11 arquivos esperados (9 modificados + 2 novos).
+- **Bug de sincronização do mount identificado e corrigido nesta sessão**: em pelo menos 3 ocasiões, arquivos editados via ferramenta de edição (lado Windows) apareceram TRUNCADOS no mount bash usado para verificação (`tsc`, balanceamento) -- não só desatualizados como em sessões anteriores, mas com o final do arquivo literalmente cortado no meio de uma linha (confirmado em `api_client.dart` e `perfil_profissional_screen.dart`, este último truncado nos DOIS lados, Windows e mount). Corrigido reescrevendo os arquivos afetados por completo via heredoc direto no mount/Windows, comparando com `git diff` linha a linha até confirmar que cada arquivo termina com as chaves de fechamento esperadas. Vale a pena, em sessões futuras, sempre conferir o FINAL de cada arquivo tocado (`tail`/`git diff` completo), não só rodar `tsc`/balanceamento -- um arquivo pode compilar limpo e ainda assim ter perdido conteúdo do meio se a truncagem cortar exatamente numa fronteira de expressão válida (não foi o caso aqui, mas é uma lacuna de verificação a ter em mente).
+- Commit `fba20d3` criado com sucesso.
+- **Não testado nesta sessão**: fluxo real no emulador/dispositivo (adicionar/remover tags, ver o profissional aparecer numa busca por uma tag adicionada depois do cadastro).
+
+### Pendências para a próxima sessão
+1. Usuário rodar `git push origin main` na própria máquina para enviar os commits desta sessão (`1ba0900`, `6596717`, `fba20d3`) — sandbox sem rede para o GitHub.
+2. Rodar a migração 11 no Neon (mesmo processo das migrações anteriores: usuário roda no SQL Editor, idealmente com a query de diagnóstico antes).
+3. Testar de verdade no Flutter: adicionar 2+ tags a um profissional, remover uma, tentar remover a última (deve recusar com a mensagem do backend), e confirmar que ele aparece na busca do mapa filtrando por QUALQUER uma das tags.
+4. Itens restantes da lista original de 7 pedidos: galeria de portfólio, selo de "verificado", mapa estático/interativo para confirmar o pino do CEP.
+5. Itens antigos ainda pendentes: confirmar `npm run dev` limpo localmente + upload real via R2 (CORS); testar cenário do bug de raio cumulativo; build "Windows (desktop)"; cropper.js no Web; critério real de "pontualidade" nas avaliações.
