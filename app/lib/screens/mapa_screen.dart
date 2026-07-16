@@ -224,26 +224,37 @@ IconData _iconeParaSubcategoria(String nomeSubcategoria, String nomeCategoria) {
   return _iconeParaCategoria(nomeCategoria);
 }
 
-/// Quantos cartões de subcategoria ficam TOTALMENTE visíveis de uma vez na
-/// fileira horizontal -- pedido explícito: "mostre 4 ícones na horizontal"
-/// (nada de um 5º cartão cortado ao meio na borda, como acontecia com a
-/// largura fixa de uma versão anterior). A largura de cada cartão é
-/// CALCULADA em `_construirSecaoCategoria` a partir da largura real da
-/// tela (`MediaQuery`), pra esse número valer em qualquer aparelho -- não
-/// é mais uma largura fixa em pixels.
-const _cartoesVisiveisPorFileira = 4;
+/// Quantas COLUNAS a grade de subcategorias de cada categoria tem -- pedido
+/// explícito: "Implementar uma GridView com 4 colunas... cada linha
+/// horizontal do bloco... exibirá 4 ícones de subcategoria simultaneamente".
+/// Substitui a fileira de scroll horizontal de uma versão anterior (que
+/// mostrava só `_cartoesVisiveisPorFileira` cartões por vez, exigindo
+/// arrastar pros lados para ver o resto) por uma grade que QUEBRA linha
+/// (`GridView.count`, ver `_construirSecaoCategoria`) -- todas as
+/// subcategorias da categoria ficam visíveis de uma vez, em quantas linhas
+/// forem necessárias (não há um teto fixo de linhas: uma categoria com 20
+/// subcategorias simplesmente ganha mais linhas que uma com 6). A largura
+/// de cada cartão (e, por tabela, a proporção altura/largura passada pro
+/// `GridView.count`) é CALCULADA a partir da largura real da tela
+/// (`MediaQuery`) em `_construirSecaoCategoria`, pra as 4 colunas caberem
+/// inteiras em qualquer aparelho.
+const _colunasGradeSubcategoria = 4;
 
-/// Altura fixa de cada cartão -- ícone + nome (até 2 linhas) + contagem.
-/// 132 (não mais 108) porque 108 não sobrava espaço suficiente para o
+/// Altura de referência de cada cartão -- ícone + nome (até 2 linhas) +
+/// contagem. Usada para calcular a PROPORÇÃO (largura/altura) passada ao
+/// `GridView.count` em `_construirSecaoCategoria` (`childAspectRatio`),
+/// não mais como altura fixa de `SizedBox` (a fileira de scroll horizontal
+/// que usava isso diretamente foi substituída pela grade). O valor em si
+/// (132, não mais 108) segue sendo o que garante espaço suficiente para o
 /// conteúdo no tamanho máximo do ícone/fonte (ver `_CartaoSubcategoria`,
-/// que escala com a largura do cartão): o Column ficava mais alto do que o
-/// cartão, e o Flutter desenhava a faixa de aviso de "overflow" (listras
-/// pretas/amarelas com texto em vermelho) bem em cima do nome da
-/// subcategoria -- o que o usuário relatou como "umas letrinhas em
-/// vermelho que atrapalham a leitura da subclasse".
+/// que escala com a largura do cartão) sem o Flutter desenhar a faixa de
+/// aviso de "overflow" (listras pretas/amarelas com texto em vermelho) em
+/// cima do nome da subcategoria.
 const _alturaCartaoSubcategoria = 132.0;
 
-/// Espaçamento entre os cartões da fileira horizontal.
+/// Espaçamento entre os cartões da grade -- usado tanto na direção
+/// horizontal (`crossAxisSpacing`) quanto vertical (`mainAxisSpacing`) do
+/// `GridView.count`.
 const _espacamentoCartaoSubcategoria = 10.0;
 
 /// As três formas de ordenar o resultado da busca -- espelha
@@ -653,13 +664,13 @@ class _MapaScreenState extends State<MapaScreen> {
       //
       // Pedido explícito: "mover os campos de busca e os filtros para
       // dentro do widget do mapa, criando uma experiência de sobreposição
-      // (overlay) flutuante". A barra de busca e a barra de filtros (antes
-      // duas faixas empilhadas AQUI, entre o mapa e a grade de categorias)
-      // agora moram DENTRO do `Stack` de `_construirCabecalhoComMapa`,
-      // como `Positioned` flutuando sobre o mapa -- ver os dois
-      // `Positioned` finais lá dentro, e `_construirBarraFiltrosFlutuante`
-      // logo abaixo desta classe. A lógica (`_aoMudarSubcategoria`,
-      // `_aoMudarOrdenacao`, `_aoMudarRaio`, toggle de raio) não mudou em
+      // (overlay) flutuante". A barra de busca e os chips de ordenação
+      // (antes duas faixas empilhadas AQUI, entre o mapa e a grade de
+      // categorias) agora moram DENTRO do `Stack` de
+      // `_construirCabecalhoComMapa`, como `Positioned` flutuando sobre o
+      // mapa -- ver os dois `Positioned` finais lá dentro, e
+      // `_construirChipsOrdenacaoFlutuantes` logo abaixo desta classe. A
+      // lógica (`_aoMudarSubcategoria`, `_aoMudarOrdenacao`) não mudou em
       // NADA -- só o container visual que as hospeda.
       body: Column(
         children: [
@@ -762,12 +773,12 @@ class _MapaScreenState extends State<MapaScreen> {
                   )
                 else
                   // Lista de listas: uma seção por categoria (título em
-                  // negrito + fileira HORIZONTAL das subcategorias dela --
-                  // pedido explícito: as especialidades deslizam para os
-                  // lados, nunca empilhadas em várias linhas), empilhadas
-                  // verticalmente -- rola pra BAIXO entre categorias;
-                  // dentro de cada categoria, quem rola para os LADOS é só
-                  // a fileira dela (ver `_construirSecaoCategoria`).
+                  // negrito + GRADE de 4 colunas com as subcategorias dela
+                  // -- pedido explícito: "Implementar uma GridView com 4
+                  // colunas"), empilhadas verticalmente -- só a tela
+                  // inteira rola pra BAIXO entre categorias (a grade de
+                  // cada categoria não tem scroll próprio, ver
+                  // `_construirSecaoCategoria`).
                   // "Outros" (categoria catch-all do backend, ver
                   // `_ordenarComOutrosPorUltimo`) sempre vem por último,
                   // depois de todas as especialidades "de verdade".
@@ -788,26 +799,34 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 
   /// Uma seção da lista de listas: título em negrito da categoria + uma
-  /// FILEIRA HORIZONTAL das subcategorias dela (`ListView.builder` com
-  /// `scrollDirection: Axis.horizontal`) -- pedido explícito do usuário
-  /// para voltar ao scroll lateral por categoria: "essas cards precisam
-  /// ser deslizadas horizontalmente para esquerda e direita, não devendo
-  /// ser empilhadas". Quem rola PARA BAIXO é a tela inteira (o `ListView`
-  /// vertical que envolve todas as seções, ver `build`); quem rola PARA OS
-  /// LADOS é só esta fileira, uma por categoria.
+  /// GRADE de 4 colunas com as subcategorias dela (`GridView.count`) --
+  /// pedido explícito: "Implementar uma GridView com 4 colunas... cada
+  /// linha horizontal do bloco... exibirá 4 ícones de subcategoria
+  /// simultaneamente". Diferente da fileira de scroll horizontal de uma
+  /// versão anterior, aqui TODAS as subcategorias da categoria ficam
+  /// visíveis de uma vez (a grade quebra linha em vez de exigir arrastar
+  /// pros lados) -- o número de linhas varia com a quantidade de
+  /// subcategorias de cada categoria, sem teto fixo. Quem rola PARA BAIXO
+  /// é a tela inteira (o `ListView` vertical que envolve todas as seções,
+  /// ver `build`); a grade em si NÃO rola sozinha (`shrinkWrap: true` +
+  /// `NeverScrollableScrollPhysics`), ela só ocupa a altura que o
+  /// conteúdo pede dentro do scroll externo.
   ///
   /// A largura de cada cartão é CALCULADA a partir da largura real da tela
-  /// (`MediaQuery`) pra `_cartoesVisiveisPorFileira` (4, pedido explícito:
-  /// "mostre 4 ícones na horizontal") caberem INTEIROS na largura visível
-  /// -- nunca um 5º cartão cortado ao meio na borda. Tocar num cartão já
-  /// filtra o mapa E recentraliza a câmera (ver `_aoMudarSubcategoria`) --
-  /// sem passo intermediário nenhum.
+  /// (`MediaQuery`) pra as `_colunasGradeSubcategoria` (4) colunas caberem
+  /// INTEIRAS na largura visível -- essa largura vira a PROPORÇÃO
+  /// (`childAspectRatio`) que o `GridView.count` usa pra decidir a altura
+  /// de cada célula (a mesma altura de referência de sempre,
+  /// `_alturaCartaoSubcategoria`, ver o comentário completo na constante).
+  /// Tocar num cartão já filtra o mapa E recentraliza a câmera (ver
+  /// `_aoMudarSubcategoria`) -- sem passo intermediário nenhum.
   Widget _construirSecaoCategoria(BuildContext context, Categoria categoria) {
     final larguraTela = MediaQuery.of(context).size.width;
     final larguraDisponivel = larguraTela -
         (_paddingHorizontal * 2) -
-        (_espacamentoCartaoSubcategoria * (_cartoesVisiveisPorFileira - 1));
-    final larguraCartao = larguraDisponivel / _cartoesVisiveisPorFileira;
+        (_espacamentoCartaoSubcategoria * (_colunasGradeSubcategoria - 1));
+    final larguraCartao = larguraDisponivel / _colunasGradeSubcategoria;
+    final proporcaoCartao = larguraCartao / _alturaCartaoSubcategoria;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 22),
@@ -860,31 +879,29 @@ class _MapaScreenState extends State<MapaScreen> {
               ),
             )
           else
-            SizedBox(
-              height: _alturaCartaoSubcategoria,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-                itemCount: categoria.subcategorias.length,
-                itemBuilder: (context, index) {
-                  final subcategoria = categoria.subcategorias[index];
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      right: index == categoria.subcategorias.length - 1
-                          ? 0
-                          : _espacamentoCartaoSubcategoria,
-                    ),
-                    child: SizedBox(
-                      width: larguraCartao,
-                      child: _CartaoSubcategoria(
-                        categoria: categoria,
-                        subcategoria: subcategoria,
-                        onTap: () => _aoMudarSubcategoria(subcategoria),
-                      ),
-                    ),
-                  );
-                },
-              ),
+            GridView.count(
+              crossAxisCount: _colunasGradeSubcategoria,
+              // A grade vive DENTRO do `ListView` vertical que envolve
+              // todas as seções (ver `build`) -- sem `shrinkWrap` +
+              // `NeverScrollableScrollPhysics`, o Flutter tentaria dar à
+              // grade uma altura própria (infinita) e um scroll próprio,
+              // o que quebra dentro de outro `Scrollable`. Com os dois,
+              // ela só ocupa a altura real do conteúdo e deixa o scroll
+              // pra quem já envolve ela por fora.
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+              mainAxisSpacing: _espacamentoCartaoSubcategoria,
+              crossAxisSpacing: _espacamentoCartaoSubcategoria,
+              childAspectRatio: proporcaoCartao,
+              children: [
+                for (final subcategoria in categoria.subcategorias)
+                  _CartaoSubcategoria(
+                    categoria: categoria,
+                    subcategoria: subcategoria,
+                    onTap: () => _aoMudarSubcategoria(subcategoria),
+                  ),
+              ],
             ),
         ],
       ),
@@ -1119,136 +1136,88 @@ class _MapaScreenState extends State<MapaScreen> {
             ),
           ),
 
-          // Barra de busca FLUTUANTE sobre o mapa -- pedido explícito:
-          // "criar um widget Positioned (flutuante) dentro do Stack,
-          // centralizado horizontalmente na parte superior do mapa", com
-          // um `top` que a deixe "logo abaixo da saudação". `top:
-          // _topBarraBuscaFlutuante` (100) cai depois do fim visual do
-          // conteúdo do cabeçalho (avatar + saudação, que termina bem
-          // antes disso) e dentro da área onde o cartão do mapa já está
-          // pintado por cima do cabeçalho (o cartão começa em
-          // `topoDoCartao`, 92) -- ou seja, a barra aparece flutuando
-          // sobre a SUPERFÍCIE do mapa, não mais empilhada abaixo dele.
-          // É o MESMO widget `_construirBarraDeBusca` de sempre (mesmo
-          // campo, mesma lógica de `_aoMudarSubcategoria`) -- só o
-          // `Positioned` que o hospeda é novo.
+          // Barra de busca FLUTUANTE sobre o mapa -- centralizada
+          // horizontalmente, mas agora com largura MENOR que a tela
+          // inteira (pedido explícito: "ela não deve mais ocupar toda a
+          // extensão horizontal da tela... 80% da largura da tela"). O
+          // `Positioned` continua esticado de ponta a ponta (`left: 0,
+          // right: 0`) só para dar uma área de centralização -- quem
+          // efetivamente limita a largura é o `SizedBox` dentro do
+          // `Center`, não o `Positioned` em si. `top:
+          // _topBarraBuscaFlutuante` (100) continua o mesmo: cai depois
+          // do fim visual do cabeçalho (avatar + saudação) e já dentro da
+          // área onde o cartão do mapa é pintado por cima dele -- a barra
+          // flutua sobre a SUPERFÍCIE do mapa. É o MESMO widget
+          // `_construirBarraDeBusca` de sempre (mesmo campo, mesma
+          // lógica de `_aoMudarSubcategoria`) -- só a largura mudou.
           Positioned(
             top: _topBarraBuscaFlutuante,
-            left: _paddingHorizontal,
-            right: _paddingHorizontal,
-            child: _construirBarraDeBusca(context),
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.8,
+                child: _construirBarraDeBusca(context),
+              ),
+            ),
           ),
 
-          // Barra de filtros FLUTUANTE sobre o mapa, no rodapé -- pedido
-          // explícito: "um segundo widget Positioned, alinhado à parte
-          // inferior do mapa (bottom: 20)". Agrupa a linha de ordenação
-          // + o sub-filtro de raio + o ícone de filtros, que antes viviam
-          // empilhados numa faixa fixa ABAIXO do cartão do mapa -- ver
-          // `_construirBarraFiltrosFlutuante` logo abaixo desta classe
-          // para o conteúdo (a lógica de `_aoMudarOrdenacao`/`_aoMudarRaio`
-          // não mudou, só o container visual).
+          // Chips de ordenação FLUTUANTES E INDIVIDUAIS sobre o mapa, no
+          // rodapé -- pedido explícito: "Remover o contêiner branco único
+          // que agrupa todos os filtros... transformar os três chips...
+          // em widgets Chip ou ChoiceChip independentes, posicionados
+          // diretamente sobre o mapa... Remover o ícone de filtro e os
+          // chips de distância". Diferente de uma versão anterior (um
+          // único cartão branco arredondado agrupando ordenação + raio +
+          // ícone), agora é só uma fileira TRANSPARENTE (sem `Container`/
+          // `BoxDecoration` nenhum por trás) com os três `ChoiceChip` de
+          // ordenação, cada um flutuando com a própria sombra. O
+          // sub-filtro de raio e o ícone de filtro saíram da tela --
+          // `_aoMudarRaio`/`_raioSelecionado`/`_ultimoRaioComCirculo`
+          // continuam existindo no código (o círculo do raio no mapa
+          // ainda funcionaria se algo os chamasse de novo no futuro), só
+          // não há mais nenhum chip na tela que os aciona.
           Positioned(
             left: _paddingHorizontal,
             right: _paddingHorizontal,
             bottom: 20,
-            child: _construirBarraFiltrosFlutuante(context),
+            child: _construirChipsOrdenacaoFlutuantes(context),
           ),
         ],
       ),
     );
   }
 
-  /// Barra de filtros FLUTUANTE (ordenação + raio + ícone de filtro) --
-  /// pedido explícito: mover a linha "Mais próximos" / "Melhor
-  /// custo-benefício" / "Melhores avaliados" e o sub-filtro de raio ("Até
-  /// 2km" ... "Mais que 15km") para DENTRO de um cartão flutuante sobre o
-  /// mapa, no rodapé dele, em vez de ficarem empilhados numa faixa fixa
-  /// abaixo do cartão do mapa. A LÓGICA é exatamente a mesma de sempre
-  /// (`_aoMudarOrdenacao`/`_aoMudarRaio`, toggle de raio, o sub-filtro só
-  /// aparecendo quando a ordenação é "Mais próximos" via
-  /// `AnimatedCrossFade`) -- só o container visual mudou.
+  /// Chips de ordenação flutuantes -- pedido explícito: cada um dos três
+  /// botões fixos "Mais próximos" / "Melhor custo-benefício" / "Melhores
+  /// avaliados" vira um `ChoiceChip` INDEPENDENTE, sem nenhum cartão/
+  /// contêiner branco por trás agrupando eles (transparente, "flutuando
+  /// diretamente sobre o mapa"). `backgroundColor`/`elevation`/
+  /// `shadowColor` explícitos em CADA chip é o que garante que eles ainda
+  /// se destaquem sobre o mapa (que tem áreas escuras e claras variadas)
+  /// mesmo sem um fundo comum atrás -- cada um flutua com a própria
+  /// sombra. A lógica de seleção (`_aoMudarOrdenacao`) não mudou em nada.
   ///
-  /// Cada fileira de chips rola HORIZONTALMENTE dentro do cartão (em vez
-  /// de um `Wrap`, que quebraria linha e deixaria o cartão flutuante alto
-  /// demais sobre o mapa) -- garante que todos os chips cabem sem quebrar
-  /// o layout, não importa quantos existam.
-  Widget _construirBarraFiltrosFlutuante(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.16),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+  /// Fileira rola HORIZONTALMENTE (em vez de `Wrap`) para nunca quebrar
+  /// linha nem cortar chip nenhum, não importa a largura da tela.
+  Widget _construirChipsOrdenacaoFlutuantes(BuildContext context) {
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
         children: [
-          // Ícone de filtro + linha de ordenação, os TRÊS botões fixos
-          // "Mais próximos" / "Melhor custo-benefício" / "Melhores
-          // avaliados" -- pedido explícito: "o ícone de filtros (o
-          // símbolo de |:| à esquerda) também deve ser incluído dentro
-          // deste contêiner flutuante".
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                Icon(Icons.tune, size: 20, color: Colors.grey.shade700),
-                const SizedBox(width: 10),
-                for (final ordenacao in _OrdenacaoBusca.values)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(ordenacao.rotulo),
-                      selected: _ordenacaoSelecionada == ordenacao,
-                      onSelected: (_) => _aoMudarOrdenacao(ordenacao),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // Sub-filtro de raio: só existe -- visualmente -- quando a
-          // ordenação é "Mais próximos". Mesmo `AnimatedCrossFade` de
-          // sempre (entra/sai com fade + colapso de altura).
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 220),
-            sizeCurve: Curves.easeInOut,
-            crossFadeState: _ordenacaoSelecionada == _OrdenacaoBusca.distancia
-                ? CrossFadeState.showFirst
-                : CrossFadeState.showSecond,
-            firstChild: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: SizedBox(
-                height: 36,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    for (final opcao in _OpcaoRaio.values)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(opcao.rotulo),
-                          selected: _raioSelecionado == opcao,
-                          onSelected: (_) => _aoMudarRaio(opcao),
-                        ),
-                      ),
-                  ],
-                ),
+          for (final ordenacao in _OrdenacaoBusca.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(ordenacao.rotulo),
+                selected: _ordenacaoSelecionada == ordenacao,
+                onSelected: (_) => _aoMudarOrdenacao(ordenacao),
+                backgroundColor: Colors.white,
+                shadowColor: Colors.black45,
+                elevation: 3,
               ),
             ),
-            // Placeholder de altura zero -- é o que faz o `AnimatedCrossFade`
-            // "colapsar" a linha inteira (não só esconder o conteúdo) quando
-            // a ordenação não é por distância.
-            secondChild: const SizedBox(width: double.infinity, height: 0),
-          ),
         ],
       ),
     );
@@ -1308,14 +1277,15 @@ class _MapaScreenState extends State<MapaScreen> {
 /// calculada pelo backend). Tocar já filtra o mapa por essa especialidade
 /// (ver `_aoMudarSubcategoria`).
 ///
-/// Sem largura própria -- quem define a largura é o `SizedBox` que o
-/// envolve em `_construirSecaoCategoria` (calculada ali a partir da
-/// largura real da tela, pra exatamente `_cartoesVisiveisPorFileira`
-/// caberem inteiros). O `LayoutBuilder` abaixo lê essa largura de volta e
-/// escala o círculo do ícone e as fontes PROPORCIONALMENTE a ela -- pedido
-/// explícito ("se for preciso aumentar as cartas para caber melhor,
-/// faça"): em telas mais largas os ícones ficam maiores; em telas mais
-/// estreitas, encolhem levemente em vez de estourar/cortar o cartão.
+/// Sem largura própria -- quem define a largura é a CÉLULA do
+/// `GridView.count` que o envolve em `_construirSecaoCategoria`
+/// (`crossAxisCount: _colunasGradeSubcategoria`, largura calculada a
+/// partir da largura real da tela pra as 4 colunas caberem inteiras). O
+/// `LayoutBuilder` abaixo lê essa largura de volta e escala o círculo do
+/// ícone e as fontes PROPORCIONALMENTE a ela -- pedido explícito ("se for
+/// preciso aumentar as cartas para caber melhor, faça"): em telas mais
+/// largas os ícones ficam maiores; em telas mais estreitas, encolhem
+/// levemente em vez de estourar/cortar o cartão.
 class _CartaoSubcategoria extends StatelessWidget {
   final Categoria categoria;
   final Subcategoria subcategoria;
