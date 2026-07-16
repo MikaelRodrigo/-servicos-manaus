@@ -189,12 +189,14 @@ IconData _iconeParaSubcategoria(String nomeSubcategoria, String nomeCategoria) {
   return _iconeParaCategoria(nomeCategoria);
 }
 
-/// Largura fixa de cada cartão de subcategoria na fileira horizontal --
-/// pedido explícito do usuário para VOLTAR ao scroll lateral por categoria
-/// (em vez da grade 4x3 empilhada verticalmente de uma versão anterior):
-/// "essas cards precisam ser deslizadas horizontalmente para esquerda e
-/// direita, não devendo ser empilhadas".
-const _larguraCartaoSubcategoria = 104.0;
+/// Quantos cartões de subcategoria ficam TOTALMENTE visíveis de uma vez na
+/// fileira horizontal -- pedido explícito: "mostre 4 ícones na horizontal"
+/// (nada de um 5º cartão cortado ao meio na borda, como acontecia com a
+/// largura fixa de uma versão anterior). A largura de cada cartão é
+/// CALCULADA em `_construirSecaoCategoria` a partir da largura real da
+/// tela (`MediaQuery`), pra esse número valer em qualquer aparelho -- não
+/// é mais uma largura fixa em pixels.
+const _cartoesVisiveisPorFileira = 4;
 
 /// Altura fixa de cada cartão -- agora só ícone + nome + contagem (sem
 /// foto de fundo, ver `_CartaoSubcategoria`), bem mais baixo do que quando
@@ -816,15 +818,25 @@ class _MapaScreenState extends State<MapaScreen> {
   /// Uma seção da lista de listas: título em negrito da categoria + uma
   /// FILEIRA HORIZONTAL das subcategorias dela (`ListView.builder` com
   /// `scrollDirection: Axis.horizontal`) -- pedido explícito do usuário
-  /// para voltar ao scroll lateral por categoria, revertendo a grade 4x3
-  /// empilhada de uma versão anterior: "essas cards precisam ser
-  /// deslizadas horizontalmente para esquerda e direita, não devendo ser
-  /// empilhadas". Quem rola PARA BAIXO é a tela inteira (o `ListView`
+  /// para voltar ao scroll lateral por categoria: "essas cards precisam
+  /// ser deslizadas horizontalmente para esquerda e direita, não devendo
+  /// ser empilhadas". Quem rola PARA BAIXO é a tela inteira (o `ListView`
   /// vertical que envolve todas as seções, ver `build`); quem rola PARA OS
-  /// LADOS é só esta fileira, uma por categoria. Tocar num cartão já
+  /// LADOS é só esta fileira, uma por categoria.
+  ///
+  /// A largura de cada cartão é CALCULADA a partir da largura real da tela
+  /// (`MediaQuery`) pra `_cartoesVisiveisPorFileira` (4, pedido explícito:
+  /// "mostre 4 ícones na horizontal") caberem INTEIROS na largura visível
+  /// -- nunca um 5º cartão cortado ao meio na borda. Tocar num cartão já
   /// filtra o mapa E recentraliza a câmera (ver `_aoMudarSubcategoria`) --
   /// sem passo intermediário nenhum.
   Widget _construirSecaoCategoria(BuildContext context, Categoria categoria) {
+    final larguraTela = MediaQuery.of(context).size.width;
+    final larguraDisponivel = larguraTela -
+        (_paddingHorizontal * 2) -
+        (_espacamentoCartaoSubcategoria * (_cartoesVisiveisPorFileira - 1));
+    final larguraCartao = larguraDisponivel / _cartoesVisiveisPorFileira;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 22),
       child: Column(
@@ -865,7 +877,7 @@ class _MapaScreenState extends State<MapaScreen> {
                           : _espacamentoCartaoSubcategoria,
                     ),
                     child: SizedBox(
-                      width: _larguraCartaoSubcategoria,
+                      width: larguraCartao,
                       child: _CartaoSubcategoria(
                         categoria: categoria,
                         subcategoria: subcategoria,
@@ -904,9 +916,16 @@ class _MapaScreenState extends State<MapaScreen> {
     required Color corRaio,
   }) {
     const alturaCabecalho = 128.0;
-    // Mapa mais "quadrado" (pedido explícito) -- 172 -> 220, ocupando mais
-    // espaço vertical em vez do formato baixo/alongado de antes.
-    const alturaCartaoMapa = 220.0;
+    // Mapa mais alto (pedido explícito: "aumente ele verticalmente 4cm")
+    // -- 220 -> 472, ou seja, +252 de altura. Conversão cm -> pixels
+    // lógicos usando a referência de densidade do Flutter/Android (dp,
+    // 160 pixels lógicos por polegada -- MESMA base do `dp` do Android,
+    // que é o que o Flutter chama de "logical pixel"): 4cm ÷ 2.54cm/pol ×
+    // 160px/pol ≈ 252px. O tamanho físico exato na tela do usuário varia
+    // um pouco com a densidade real do aparelho, mas essa é a aproximação
+    // padrão usada pra converter medidas físicas em pixels lógicos no
+    // Flutter.
+    const alturaCartaoMapa = 472.0;
     const sobreposicao = 36.0;
     const topoDoCartao = alturaCabecalho - sobreposicao;
     // Altura visual TOTAL deste widget, do topo do cabeçalho até a borda
@@ -1154,9 +1173,14 @@ class _MapaScreenState extends State<MapaScreen> {
 /// calculada pelo backend). Tocar já filtra o mapa por essa especialidade
 /// (ver `_aoMudarSubcategoria`).
 ///
-/// Sem tamanho próprio -- quem define largura/altura é o `SizedBox` que o
-/// envolve em `_construirSecaoCategoria` (`_larguraCartaoSubcategoria`/
-/// `_alturaCartaoSubcategoria`).
+/// Sem largura própria -- quem define a largura é o `SizedBox` que o
+/// envolve em `_construirSecaoCategoria` (calculada ali a partir da
+/// largura real da tela, pra exatamente `_cartoesVisiveisPorFileira`
+/// caberem inteiros). O `LayoutBuilder` abaixo lê essa largura de volta e
+/// escala o círculo do ícone e as fontes PROPORCIONALMENTE a ela -- pedido
+/// explícito ("se for preciso aumentar as cartas para caber melhor,
+/// faça"): em telas mais largas os ícones ficam maiores; em telas mais
+/// estreitas, encolhem levemente em vez de estourar/cortar o cartão.
 class _CartaoSubcategoria extends StatelessWidget {
   final Categoria categoria;
   final Subcategoria subcategoria;
@@ -1175,35 +1199,52 @@ class _CartaoSubcategoria extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: AppColors.destaque.withValues(alpha: 0.12),
-                child: Icon(
-                  _iconeParaSubcategoria(subcategoria.nome, categoria.nome),
-                  color: AppColors.destaque,
-                  size: 24,
-                ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final largura = constraints.maxWidth;
+            // Círculo do ícone entre 22 e 30 -- proporcional à largura do
+            // cartão, mas sempre dentro de um intervalo legível (nem
+            // minúsculo numa tela estreita, nem exagerado numa tela larga).
+            final raioIcone = (largura * 0.32).clamp(22.0, 30.0);
+            final tamanhoIcone = raioIcone * 0.92;
+            final fonteNome = (largura * 0.135).clamp(10.5, 13.0);
+            final fonteContagem = fonteNome - 2;
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: raioIcone,
+                    backgroundColor: AppColors.destaque.withValues(alpha: 0.12),
+                    child: Icon(
+                      _iconeParaSubcategoria(subcategoria.nome, categoria.nome),
+                      color: AppColors.destaque,
+                      size: tamanhoIcone,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    subcategoria.nome,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: fonteNome,
+                      height: 1.15,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${subcategoria.totalProfissionais} prof.',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: fonteContagem),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                subcategoria.nome,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11, height: 1.15),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${subcategoria.totalProfissionais} prof.',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 9),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
