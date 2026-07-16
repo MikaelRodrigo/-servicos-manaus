@@ -66,7 +66,9 @@ String _saudacaoPorHorario() {
 /// ver `categoria.dart`; inventar fotos de banco de imagens pareceria dado
 /// real sem ser). É puramente decorativo/de navegação, com um fallback
 /// neutro (`Icons.apps_rounded`) para qualquer categoria futura que não
-/// bata em nenhuma palavra-chave conhecida.
+/// bata em nenhuma palavra-chave conhecida. Também serve de FALLBACK para
+/// `_iconeParaSubcategoria` abaixo, quando uma subcategoria não tem ícone
+/// próprio mapeado.
 IconData _iconeParaCategoria(String nome) {
   final n = nome.toLowerCase();
   if (n.contains('manuten') || n.contains('reform')) return Icons.home_repair_service_rounded;
@@ -84,106 +86,123 @@ IconData _iconeParaCategoria(String nome) {
   return Icons.apps_rounded;
 }
 
-/// Palavra-chave temática de uma categoria, pela MESMA lógica de
-/// correspondência de `_iconeParaCategoria` -- usada por
-/// `_urlImagemParaSubcategoria` pra montar a URL da foto de fundo de cada
-/// cartão de subcategoria (ver `_CartaoSubcategoria`).
-String _palavraChaveParaCategoria(String nome) {
-  final n = nome.toLowerCase();
-  if (n.contains('manuten') || n.contains('reform')) return 'repair';
-  if (n.contains('log') || n.contains('transport')) return 'delivery';
-  if (n.contains('beleza') || n.contains('bem-estar') || n.contains('bem estar')) return 'beauty';
-  if (n.contains('tecnolog') || n.contains('digital')) return 'technology';
-  if (n.contains('educa') || n.contains('consultoria')) return 'education';
-  if (n.contains('aliment') || n.contains('evento')) return 'food';
-  if (n.contains('pet') || n.contains('animal')) return 'pets';
-  if (n.contains('limpeza')) return 'cleaning';
-  if (n.contains('saude') || n.contains('saúde')) return 'healthcare';
-  if (n.contains('jardim')) return 'garden';
-  return 'business';
+/// Ícone representativo de CADA subcategoria (não só da categoria-mãe),
+/// escolhido por palavra-chave no nome -- pedido explícito do usuário para
+/// substituir as fotos (de terceiros/placeholder) dos cartões da grade
+/// "Explore por especialidade" por ícones. Cobre tanto os nomes ORIGINAIS
+/// do seed (`09_categorias_subcategorias.sql`) quanto os nomes já
+/// renomeados pela migração `13_reorganizacao_taxonomia_categorias.sql`
+/// (ex.: bate tanto com "Pedreiro" quanto com "Pedreiro / Alvenaria") --
+/// funciona independente de essa migração já ter rodado ou não no banco
+/// em uso. Cai em `_iconeParaCategoria(nomeCategoria)` para qualquer
+/// subcategoria sem palavra-chave própria mapeada aqui (nunca fica sem
+/// ícone nenhum).
+IconData _iconeParaSubcategoria(String nomeSubcategoria, String nomeCategoria) {
+  final n = nomeSubcategoria.toLowerCase();
+
+  // Manutenção e Reformas (Lar)
+  if (n.contains('pedreiro') || n.contains('alvenaria')) return Icons.foundation_rounded;
+  if (n.contains('pintor')) return Icons.format_paint_rounded;
+  if (n.contains('encanador')) return Icons.plumbing_rounded;
+  if (n.contains('eletricista')) return Icons.electrical_services_rounded;
+  if (n.contains('vidraceiro')) return Icons.window_rounded;
+  if (n.contains('marceneiro') || n.contains('montador')) return Icons.handyman_rounded;
+  if (n.contains('gesseiro')) return Icons.architecture_rounded;
+  if (n.contains('serralheiro')) return Icons.hardware_rounded;
+  if (n.contains('telhadista')) return Icons.roofing_rounded;
+  if (n.contains('impermeabiliza')) return Icons.water_drop_rounded;
+  if (n.contains('ar-condicionado') || n.contains('ar condicionado')) return Icons.ac_unit_rounded;
+  if (n.contains('chaveiro')) return Icons.key_rounded;
+  if (n.contains('jardineiro')) return Icons.yard_rounded;
+  if (n.contains('piscineiro')) return Icons.pool_rounded;
+
+  // Logística e Transporte
+  if (n.contains('frete') || n.contains('carreto')) return Icons.local_shipping_rounded;
+  if (n.contains('mudan')) return Icons.moving_rounded;
+  if (n.contains('motoboy') || n.contains('entregador')) return Icons.two_wheeler_rounded;
+  if (n.contains('pequenos volumes')) return Icons.inventory_2_rounded;
+  if (n.contains('taxista')) return Icons.local_taxi_rounded;
+  if (n.contains('aplicativo')) return Icons.directions_car_rounded;
+
+  // Beleza e Bem-Estar
+  if (n.contains('cabeleireiro')) return Icons.content_cut_rounded;
+  if (n.contains('barbeiro')) return Icons.face_retouching_natural_rounded;
+  if (n.contains('manicure') || n.contains('pedicure')) return Icons.clean_hands_rounded;
+  if (n.contains('sobrancelha')) return Icons.remove_red_eye_rounded;
+  if (n.contains('maquiadora')) return Icons.brush_rounded;
+  if (n.contains('depiladora')) return Icons.spa_rounded;
+  if (n.contains('massoterapeuta')) return Icons.self_improvement_rounded;
+  if (n.contains('esteticista')) return Icons.face_rounded;
+  if (n.contains('personal trainer')) return Icons.fitness_center_rounded;
+
+  // Tecnologia e Serviços Digitais
+  if (n.contains('desenvolvedor') || n.contains('programador')) return Icons.code_rounded;
+  if (n.contains('designer gráfico') || n.contains('designer grafico')) {
+    return Icons.palette_rounded;
+  }
+  if (n.contains('social media') || n.contains('redes sociais')) return Icons.share_rounded;
+  if (n.contains('tráfego') || n.contains('trafego')) return Icons.trending_up_rounded;
+  if (n.contains('redator') || n.contains('copywriter')) return Icons.edit_note_rounded;
+  if (n.contains('edição de vídeo') || n.contains('edicao de video')) {
+    return Icons.movie_creation_rounded;
+  }
+  if (n.contains('sites')) return Icons.web_rounded;
+  if (n.contains('suporte') || n.contains('informática') || n.contains('informatica')) {
+    return Icons.support_agent_rounded;
+  }
+  if (n.contains('celular') || n.contains('smartphone')) return Icons.phone_android_rounded;
+
+  // Educação e Consultoria
+  if (n.contains('professor')) return Icons.school_rounded;
+  if (n.contains('consultor financeiro')) return Icons.attach_money_rounded;
+  if (n.contains('coach')) return Icons.psychology_rounded;
+  if (n.contains('contador')) return Icons.calculate_rounded;
+  if (n.contains('advogado')) return Icons.gavel_rounded;
+  if (n.contains('arquiteto')) return Icons.architecture_rounded;
+  if (n.contains('tradutor')) return Icons.translate_rounded;
+
+  // Alimentação e Eventos
+  if (n.contains('fotógrafo') || n.contains('fotografo')) return Icons.camera_alt_rounded;
+  if (n.contains('confeiteira') || n.contains('bolo')) return Icons.cake_rounded;
+  if (n.contains('buffet') || n.contains('cozinheiro')) return Icons.restaurant_rounded;
+  if (n.contains('cerimonialista') || n.contains('organizador de eventos')) {
+    return Icons.celebration_rounded;
+  }
+  if (n.contains('garçom') || n.contains('garcom') || n.contains('copeira')) {
+    return Icons.room_service_rounded;
+  }
+  if (n.contains('dj') || n.contains('músico') || n.contains('musico')) {
+    return Icons.music_note_rounded;
+  }
+
+  // Outros Serviços (ex-Serviços Gerais e Pet)
+  if (n.contains('pet sitter') || n.contains('passeador')) return Icons.pets_rounded;
+  if (n.contains('adestrador')) return Icons.pets_rounded;
+  if (n.contains('artesão') || n.contains('artesao')) return Icons.palette_rounded;
+  if (n.contains('costureira')) return Icons.checkroom_rounded;
+  if (n.contains('diarista') || n.contains('faxineiro')) return Icons.cleaning_services_rounded;
+  if (n.contains('passadeira')) return Icons.iron_rounded;
+  if (n.contains('estofados') || n.contains('automotiva')) return Icons.local_car_wash_rounded;
+
+  if (n.trim() == 'outros') return Icons.apps_rounded;
+
+  return _iconeParaCategoria(nomeCategoria);
 }
 
-/// Foto real ilustrando uma subcategoria -- fundo dos cartões da grade de
-/// cada seção (ver `_CartaoSubcategoria`). Usa a palavra-chave TEMÁTICA da
-/// categoria-mãe (subcategorias não têm uma lógica própria de
-/// correspondência -- "Pedreiro" e "Pintor", por exemplo, cairiam nas
-/// mesmas fotos genéricas de "reparo" de qualquer forma), mas com o
-/// `lock=` calculado a partir da combinação categoria+subcategoria, pra
-/// cada cartão dentro da mesma categoria mostrar uma foto DIFERENTE (ainda
-/// dentro do mesmo tema) -- em vez de repetir a mesma imagem em todos os
-/// cartões da grade.
-///
-/// PLACEHOLDER DE TERCEIROS -- ATENÇÃO ANTES DE PRODUÇÃO: o backend não
-/// tem (ainda) um campo de imagem por subcategoria (ver `Subcategoria` em
-/// categoria.dart), então esta função busca fotos temáticas prontas no
-/// LoremFlickr (serviço gratuito, sem chave de API, que devolve fotos
-/// reais do Flickr por palavra-chave -- ver https://loremflickr.com).
-/// Isso resolve o pedido de "fotos reais de alta qualidade" sem inventar
-/// nenhum dado sobre profissionais/avaliações/contagens (que continuam
-/// 100% reais, vindos do backend) -- mas são fotos de TERCEIROS, sem
-/// licença clara confirmada para uso comercial. Antes de lançar o app de
-/// verdade, troque por fotos próprias (ou com licença comercial/CC
-/// confirmada), idealmente vindas do backend (um campo de imagem por
-/// subcategoria, com upload pelo painel administrativo).
-String _urlImagemParaSubcategoria(String nomeCategoria, String nomeSubcategoria) {
-  final palavraChave = _palavraChaveParaCategoria(nomeCategoria);
-  final semente = '$nomeCategoria|$nomeSubcategoria'.hashCode.abs();
-  return 'https://loremflickr.com/400/300/$palavraChave?lock=$semente';
-}
+/// Largura fixa de cada cartão de subcategoria na fileira horizontal --
+/// pedido explícito do usuário para VOLTAR ao scroll lateral por categoria
+/// (em vez da grade 4x3 empilhada verticalmente de uma versão anterior):
+/// "essas cards precisam ser deslizadas horizontalmente para esquerda e
+/// direita, não devendo ser empilhadas".
+const _larguraCartaoSubcategoria = 104.0;
 
-/// Fotos REAIS (não-placeholder) enviadas pelo usuário, uma por
-/// subcategoria -- ver `assets/images/subcategorias/` e a entrada
-/// `assets:` em `pubspec.yaml`. Chave = nome EXATO da subcategoria depois
-/// da migração `13_reorganizacao_taxonomia_categorias.sql` (renomeios de
-/// rótulo incluídos) -- se essa migração ainda não rodou no banco em uso,
-/// os nomes antigos ("Pedreiro", "Marceneiro" etc.) não batem com nenhuma
-/// chave aqui e o cartão cai no placeholder de `_urlImagemParaSubcategoria`
-/// normalmente (nunca quebra, só não usa a foto real ainda).
-///
-/// Só cobre as subcategorias para as quais o usuário mandou foto própria;
-/// todas as outras continuam no placeholder do LoremFlickr até ganharem
-/// foto real também.
-const Map<String, String> _fotosLocaisPorSubcategoria = {
-  'Chaveiro': 'assets/images/subcategorias/chaveiro.jpg',
-  'Eletricista': 'assets/images/subcategorias/eletricista.jpg',
-  'Encanador': 'assets/images/subcategorias/encanador.jpg',
-  'Gesseiro': 'assets/images/subcategorias/gesseiro.jpg',
-  'Impermeabilizador': 'assets/images/subcategorias/impermeabilizador.jpg',
-  'Jardineiro': 'assets/images/subcategorias/jardineiro.jpg',
-  'Limpeza de Ar-Condicionado': 'assets/images/subcategorias/limpeza_ar_condicionado.jpg',
-  'Marceneiro / Montador de Móveis': 'assets/images/subcategorias/marceneiro.jpg',
-  'Pedreiro / Alvenaria': 'assets/images/subcategorias/pedreiro.jpg',
-  'Pintor': 'assets/images/subcategorias/pintor.jpg',
-  'Piscineiro': 'assets/images/subcategorias/piscineiro.jpg',
-  'Serralheiro': 'assets/images/subcategorias/serralheiro.jpg',
-  'Telhadista': 'assets/images/subcategorias/telhadista.jpg',
-  'Vidraceiro': 'assets/images/subcategorias/vidraceiro.jpg',
-};
+/// Altura fixa de cada cartão -- agora só ícone + nome + contagem (sem
+/// foto de fundo, ver `_CartaoSubcategoria`), bem mais baixo do que quando
+/// precisava caber uma imagem.
+const _alturaCartaoSubcategoria = 108.0;
 
-/// Caminho do asset local para uma subcategoria, se existir uma foto real
-/// mandada pelo usuário pra ela (ver `_fotosLocaisPorSubcategoria`); `null`
-/// quando não há -- nesse caso `_CartaoSubcategoria` usa o placeholder de
-/// `_urlImagemParaSubcategoria` normalmente.
-String? _caminhoAssetLocalParaSubcategoria(String nomeSubcategoria) {
-  return _fotosLocaisPorSubcategoria[nomeSubcategoria];
-}
-
-/// Grade de cartões de subcategoria dentro de cada seção -- 4 colunas
-/// (pedido explícito), o que rende 3 linhas para uma categoria com ~12
-/// especialidades (também pedido explícito: "4 horizontais e 3 na
-/// vertical"). Categorias com menos itens têm menos linhas; com mais,
-/// simplesmente mais linhas (a tela inteira já rola verticalmente, então
-/// isso nunca fica "preso" -- ver `Expanded(child: ListView(...))` no
-/// `build`).
-const _colunasGradeSubcategoria = 4;
-
-/// Espaçamento entre os cartões da grade, nos dois eixos.
-const _espacamentoGradeSubcategoria = 12.0;
-
-/// Proporção largura/altura de cada cartão -- próxima de 1 (quase
-/// quadrado, pedido explícito: "diminua menos verticalmente"), não mais um
-/// retângulo bem mais alto do que largo como a versão anterior em grade.
-const _proporcaoCartaoSubcategoria = 0.92;
+/// Espaçamento entre os cartões da fileira horizontal.
+const _espacamentoCartaoSubcategoria = 10.0;
 
 /// As três formas de ordenar o resultado da busca -- espelha
 /// `ordenar_por` em profissionais.routes.ts (`valorApi == null` equivale a
@@ -769,11 +788,12 @@ class _MapaScreenState extends State<MapaScreen> {
                   )
                 else
                   // Lista de listas: uma seção por categoria (título em
-                  // negrito + grade das subcategorias dela, 4 colunas --
-                  // pedido explícito), empilhadas verticalmente -- rola pra
-                  // BAIXO entre categorias; dentro de cada categoria, a
-                  // grade cresce em LINHAS (não rola pro lado -- a tela
-                  // inteira já rola verticalmente, ver `Expanded` acima).
+                  // negrito + fileira HORIZONTAL das subcategorias dela --
+                  // pedido explícito: as especialidades deslizam para os
+                  // lados, nunca empilhadas em várias linhas), empilhadas
+                  // verticalmente -- rola pra BAIXO entre categorias;
+                  // dentro de cada categoria, quem rola para os LADOS é só
+                  // a fileira dela (ver `_construirSecaoCategoria`).
                   // "Outros" (categoria catch-all do backend, ver
                   // `_ordenarComOutrosPorUltimo`) sempre vem por último,
                   // depois de todas as especialidades "de verdade".
@@ -794,12 +814,14 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 
   /// Uma seção da lista de listas: título em negrito da categoria + uma
-  /// GRADE de 4 colunas (`GridView.count`, pedido explícito: "4
-  /// horizontais e 3 na vertical") com um `_CartaoSubcategoria` por
-  /// especialidade dela. `shrinkWrap` + `NeverScrollableScrollPhysics`
-  /// porque quem rola é a tela inteira (o `ListView` vertical que envolve
-  /// todas as seções, ver `build`) -- a grade só ocupa a altura que
-  /// precisa, sem criar um scroll próprio por dentro. Tocar num cartão já
+  /// FILEIRA HORIZONTAL das subcategorias dela (`ListView.builder` com
+  /// `scrollDirection: Axis.horizontal`) -- pedido explícito do usuário
+  /// para voltar ao scroll lateral por categoria, revertendo a grade 4x3
+  /// empilhada de uma versão anterior: "essas cards precisam ser
+  /// deslizadas horizontalmente para esquerda e direita, não devendo ser
+  /// empilhadas". Quem rola PARA BAIXO é a tela inteira (o `ListView`
+  /// vertical que envolve todas as seções, ver `build`); quem rola PARA OS
+  /// LADOS é só esta fileira, uma por categoria. Tocar num cartão já
   /// filtra o mapa E recentraliza a câmera (ver `_aoMudarSubcategoria`) --
   /// sem passo intermediário nenhum.
   Widget _construirSecaoCategoria(BuildContext context, Categoria categoria) {
@@ -828,23 +850,30 @@ class _MapaScreenState extends State<MapaScreen> {
               ),
             )
           else
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-              child: GridView.count(
-                crossAxisCount: _colunasGradeSubcategoria,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: _espacamentoGradeSubcategoria,
-                crossAxisSpacing: _espacamentoGradeSubcategoria,
-                childAspectRatio: _proporcaoCartaoSubcategoria,
-                children: [
-                  for (final subcategoria in categoria.subcategorias)
-                    _CartaoSubcategoria(
-                      categoria: categoria,
-                      subcategoria: subcategoria,
-                      onTap: () => _aoMudarSubcategoria(subcategoria),
+            SizedBox(
+              height: _alturaCartaoSubcategoria,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+                itemCount: categoria.subcategorias.length,
+                itemBuilder: (context, index) {
+                  final subcategoria = categoria.subcategorias[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      right: index == categoria.subcategorias.length - 1
+                          ? 0
+                          : _espacamentoCartaoSubcategoria,
                     ),
-                ],
+                    child: SizedBox(
+                      width: _larguraCartaoSubcategoria,
+                      child: _CartaoSubcategoria(
+                        categoria: categoria,
+                        subcategoria: subcategoria,
+                        onTap: () => _aoMudarSubcategoria(subcategoria),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
         ],
@@ -1117,20 +1146,17 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 }
 
-/// Um cartão de subcategoria na grade "Explore por especialidade" (4
-/// colunas por categoria) -- foto real de fundo (ver
-/// `_urlImagemParaSubcategoria`; PLACEHOLDER de terceiros, ver comentário
-/// completo lá) com um degradê escuro por baixo pra manter o texto branco
-/// legível em qualquer foto, clara ou escura. Nome + contagem REAL de
-/// profissionais (`totalProfissionais`, já calculada pelo backend). Tocar
-/// já filtra o mapa por essa especialidade (ver `_aoMudarSubcategoria`).
+/// Um cartão de subcategoria na fileira horizontal "Explore por
+/// especialidade" -- SEM foto (pedido explícito: "remova essas imagens
+/// também e deixe apenas ícones que façam referência às subclasses"), só
+/// um ícone temático (`_iconeParaSubcategoria`) sobre um círculo colorido,
+/// nome e contagem REAL de profissionais (`totalProfissionais`, já
+/// calculada pelo backend). Tocar já filtra o mapa por essa especialidade
+/// (ver `_aoMudarSubcategoria`).
 ///
-/// Sem tamanho próprio -- quem define largura/altura é a célula do
-/// `GridView` que o envolve (ver `_construirSecaoCategoria`,
-/// `_proporcaoCartaoSubcategoria` cuida do "quase quadrado", correção
-/// explícita do usuário). Se a foto falhar ao carregar (sem internet,
-/// serviço fora do ar etc.), cai no MESMO visual de ícone que a tela usava
-/// antes -- nunca mostra um quadrado quebrado/cinza no lugar dela.
+/// Sem tamanho próprio -- quem define largura/altura é o `SizedBox` que o
+/// envolve em `_construirSecaoCategoria` (`_larguraCartaoSubcategoria`/
+/// `_alturaCartaoSubcategoria`).
 class _CartaoSubcategoria extends StatelessWidget {
   final Categoria categoria;
   final Subcategoria subcategoria;
@@ -1144,104 +1170,41 @@ class _CartaoSubcategoria extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final caminhoLocal = _caminhoAssetLocalParaSubcategoria(subcategoria.nome);
-
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: onTap,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Foto real do usuário quando existe (ver
-            // `_fotosLocaisPorSubcategoria`); senão, o placeholder de
-            // rede de sempre. Se o asset local declarado em `pubspec.yaml`
-            // não existir de fato no disco (usuário ainda não salvou o
-            // arquivo), `errorBuilder` cai pro MESMO placeholder de rede
-            // -- nunca quebra a tela por causa de uma foto que falta.
-            if (caminhoLocal != null)
-              Image.asset(
-                caminhoLocal,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Image.network(
-                  _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, progresso) {
-                    if (progresso == null) return child;
-                    return const ColoredBox(color: AppColors.superficieSecundaria);
-                  },
-                  errorBuilder: (_, __, ___) => _fundoIconeFallback(),
-                ),
-              )
-            else
-              Image.network(
-                _urlImagemParaSubcategoria(categoria.nome, subcategoria.nome),
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, progresso) {
-                  if (progresso == null) return child;
-                  return const ColoredBox(color: AppColors.superficieSecundaria);
-                },
-                errorBuilder: (_, __, ___) => _fundoIconeFallback(),
-              ),
-            // Degradê -- só a metade de baixo escurece, o suficiente pra
-            // nome + contagem (sempre brancos) ficarem legíveis sem
-            // esconder demais a foto.
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 56,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Color(0xCC000000)],
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: AppColors.destaque.withValues(alpha: 0.12),
+                child: Icon(
+                  _iconeParaSubcategoria(subcategoria.nome, categoria.nome),
+                  color: AppColors.destaque,
+                  size: 24,
                 ),
               ),
-            ),
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    subcategoria.nome,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                      height: 1.15,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${subcategoria.totalProfissionais} prof.',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 9),
-                  ),
-                ],
+              const SizedBox(height: 8),
+              Text(
+                subcategoria.nome,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 11, height: 1.15),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                '${subcategoria.totalProfissionais} prof.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 9),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
-  }
-
-  /// Mesmo visual de "antes" (ícone sobre um fundo claro) -- usado só como
-  /// FALLBACK, quando a foto real falha ao carregar.
-  Widget _fundoIconeFallback() {
-    return ColoredBox(
-      color: AppColors.destaque.withValues(alpha: 0.12),
-      child: Center(
-        child: Icon(_iconeParaCategoria(categoria.nome), color: AppColors.destaque, size: 32),
       ),
     );
   }
