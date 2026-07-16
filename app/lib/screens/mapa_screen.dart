@@ -86,6 +86,31 @@ IconData _iconeParaCategoria(String nome) {
   return Icons.apps_rounded;
 }
 
+/// Cor VIVA associada a cada categoria -- pedido explícito: "insira ícones
+/// ao lado das classes... que sejam mais vivos, com cores" (o ícone de
+/// `_iconeParaCategoria` sozinho, na cor neutra `AppColors.destaque` de
+/// sempre, ficava monocromático demais pra esse pedido). Cada categoria
+/// ganha uma cor temática DIFERENTE das outras -- mesma lógica de
+/// palavra-chave de `_iconeParaCategoria`, então ícone e cor sempre
+/// coincidem na mesma categoria. Fallback (`AppColors.destaque`) só pra
+/// categoria futura sem palavra-chave própria mapeada aqui.
+Color _corParaCategoria(String nome) {
+  final n = nome.toLowerCase();
+  if (n.contains('manuten') || n.contains('reform')) return Colors.brown.shade400;
+  if (n.contains('log') || n.contains('transport')) return Colors.blue.shade600;
+  if (n.contains('beleza') || n.contains('bem-estar') || n.contains('bem estar')) {
+    return Colors.pink.shade400;
+  }
+  if (n.contains('tecnolog') || n.contains('digital')) return Colors.indigo.shade500;
+  if (n.contains('educa') || n.contains('consultoria')) return Colors.teal.shade600;
+  if (n.contains('aliment') || n.contains('evento')) return Colors.deepOrange.shade400;
+  if (n.contains('pet') || n.contains('animal')) return Colors.green.shade600;
+  if (n.contains('limpeza')) return Colors.cyan.shade600;
+  if (n.contains('saude') || n.contains('saúde')) return Colors.red.shade400;
+  if (n.contains('jardim')) return Colors.lightGreen.shade700;
+  return AppColors.destaque;
+}
+
 /// Ícone representativo de CADA subcategoria (não só da categoria-mãe),
 /// escolhido por palavra-chave no nome -- pedido explícito do usuário para
 /// substituir as fotos (de terceiros/placeholder) dos cartões da grade
@@ -844,12 +869,38 @@ class _MapaScreenState extends State<MapaScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-            child: Text(
-              categoria.nome,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
+            child: Row(
+              children: [
+                // Selo colorido ao lado do nome -- pedido explícito:
+                // "insira ícones ao lado das classes... que sejam mais
+                // vivos, com cores". Ícone (`_iconeParaCategoria`) e cor
+                // (`_corParaCategoria`) usam a MESMA palavra-chave, então
+                // sempre combinam entre si -- cada categoria com sua
+                // própria cor viva, em vez de um ícone monocromático.
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: _corParaCategoria(categoria.nome).withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _iconeParaCategoria(categoria.nome),
+                    color: _corParaCategoria(categoria.nome),
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    categoria.nome,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 10),
