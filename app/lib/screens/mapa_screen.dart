@@ -1049,27 +1049,31 @@ class _MapaScreenState extends State<MapaScreen> {
             ),
           ),
           Positioned(
-            // Pedido explícito: "Mapa: Reduzir largura em 2cm, centralizar."
-            // O cartão já era centralizado (mesmo respiro `_paddingHorizontal`
-            // dos dois lados); para encolher a largura TOTAL em 2cm mantendo
-            // o centro, basta somar METADE dessa redução a cada lado do
-            // respiro original -- os dois lados crescem igualmente, então o
-            // centro nunca se desloca.
-            left: _paddingHorizontal + _cmParaPx(2) / 2,
-            right: _paddingHorizontal + _cmParaPx(2) / 2,
+            // Pedido explícito original: "Mapa: Reduzir largura em 2cm,
+            // centralizar" -- depois parcialmente revertido: "Aumente 1,2cm
+            // do mapa horizontalmente". O saldo dos dois pedidos é uma
+            // redução LÍQUIDA de 0.8cm (2 - 1.2) em relação à largura
+            // original (`_paddingHorizontal` nos dois lados, sem nenhum
+            // ajuste). Continua centralizado: a mesma metade do saldo é
+            // somada a cada lado do respiro original, então os dois lados
+            // crescem/encolhem igualmente e o centro nunca se desloca.
+            left: _paddingHorizontal + _cmParaPx(2 - 1.2) / 2,
+            right: _paddingHorizontal + _cmParaPx(2 - 1.2) / 2,
             top: topoDoCartao,
             child: Container(
               height: alturaCartaoMapa,
               decoration: BoxDecoration(
                 color: Colors.white,
                 // Pedido explícito: "Aperfeiçoe o layout aplicando bordas
-                // mais arredondadas ao widget do mapa". 28 (não mais
-                // `AppRadius.lg`, 16) -- maior que qualquer token da
-                // escala padrão (`AppRadius.xl` é só 20) de propósito, pra
-                // combinar com o arredondamento bem generoso da barra de
-                // busca flutuante por cima dele (`BorderRadius.circular
-                // (30)`, ver `_construirBarraDeBusca`) em vez de destoar.
-                borderRadius: BorderRadius.circular(28),
+                // mais arredondadas ao widget do mapa" (28, no lugar de
+                // `AppRadius.lg`, 16) -- depois "deixe as vértices um pouco
+                // mais arredondada", subindo para 32. Maior que qualquer
+                // token da escala padrão (`AppRadius.xl` é só 20) de
+                // propósito, pra combinar com o arredondamento bem generoso
+                // da barra de busca flutuante por cima dele
+                // (`BorderRadius.circular(30)`, ver `_construirBarraDeBusca`)
+                // em vez de destoar.
+                borderRadius: BorderRadius.circular(32),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.14),
@@ -1079,7 +1083,7 @@ class _MapaScreenState extends State<MapaScreen> {
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(32),
                 child: FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
