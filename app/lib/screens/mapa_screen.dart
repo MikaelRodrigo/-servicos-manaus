@@ -60,6 +60,14 @@ const _paddingHorizontal = 24.0;
 /// a SUPERFÍCIE do mapa, logo abaixo da saudação.
 const _topBarraBuscaFlutuante = 100.0;
 
+/// Converte centímetros para pixels lógicos -- mesma aproximação já usada
+/// para a altura do cartão do mapa (`alturaCartaoMapa`, ver
+/// `_construirCabecalhoComMapa`): dp/"logical pixel" do Flutter ==
+/// 160px lógicos por polegada, 2.54cm por polegada. Usada agora nos
+/// pedidos explícitos de encolher a barra de busca (3cm) e o cartão do
+/// mapa (2cm) por medidas físicas em vez de frações arbitrárias da tela.
+double _cmParaPx(double cm) => cm / 2.54 * 160;
+
 /// Saudação por horário do dia -- troca o "Olá, Nome" cru de antes por algo
 /// que reage ao momento em que a pessoa está usando o app, mesmo detalhe
 /// pequeno que apps de referência (Uber, iFood) já usam no topo da tela
@@ -890,6 +898,7 @@ class _MapaScreenState extends State<MapaScreen> {
                       child: _CartaoSubcategoria(
                         categoria: categoria,
                         subcategoria: subcategoria,
+                        indice: index,
                         onTap: () => _aoMudarSubcategoria(subcategoria),
                       ),
                     ),
@@ -1040,8 +1049,14 @@ class _MapaScreenState extends State<MapaScreen> {
             ),
           ),
           Positioned(
-            left: _paddingHorizontal,
-            right: _paddingHorizontal,
+            // Pedido explícito: "Mapa: Reduzir largura em 2cm, centralizar."
+            // O cartão já era centralizado (mesmo respiro `_paddingHorizontal`
+            // dos dois lados); para encolher a largura TOTAL em 2cm mantendo
+            // o centro, basta somar METADE dessa redução a cada lado do
+            // respiro original -- os dois lados crescem igualmente, então o
+            // centro nunca se desloca.
+            left: _paddingHorizontal + _cmParaPx(2) / 2,
+            right: _paddingHorizontal + _cmParaPx(2) / 2,
             top: topoDoCartao,
             child: Container(
               height: alturaCartaoMapa,
@@ -1151,13 +1166,19 @@ class _MapaScreenState extends State<MapaScreen> {
           // flutua sobre a SUPERFÍCIE do mapa. É o MESMO widget
           // `_construirBarraDeBusca` de sempre (mesmo campo, mesma
           // lógica de `_aoMudarSubcategoria`) -- só a largura mudou.
+          //
+          // Pedido explícito (rodada seguinte): "Barra de Pesquisa: Reduzir
+          // largura em 3cm e centralizar." Já estava centralizada (`Center`
+          // dentro do `Positioned` esticado); a centralização não muda --
+          // só encolhemos ainda mais a largura do `SizedBox` (os 80% da
+          // tela de antes, menos 3cm fixos).
           Positioned(
             top: _topBarraBuscaFlutuante,
             left: 0,
             right: 0,
             child: Center(
               child: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.8,
+                width: MediaQuery.of(context).size.width * 0.8 - _cmParaPx(3),
                 child: _construirBarraDeBusca(context),
               ),
             ),
@@ -1243,7 +1264,17 @@ class _MapaScreenState extends State<MapaScreen> {
               children: [
                 for (final opcao in _OpcaoRaio.values)
                   ChoiceChip(
-                    label: Text(opcao.rotulo),
+                    // Pedido explícito: "Alterar cor das legendas ('Até X
+                    // km') para tom de cinza mais escuro (alto contraste)"
+                    // -- sem `style` aqui, o `ChoiceChip` caía no cinza
+                    // claro padrão do tema de chips do Material (pensado
+                    // para fundos coloridos, não para o fundo BRANCO destes
+                    // chips), ficando com contraste baixo. `grey.shade800`
+                    // é escuro o bastante para AA em texto sobre branco.
+                    label: Text(
+                      opcao.rotulo,
+                      style: TextStyle(color: Colors.grey.shade800),
+                    ),
                     selected: _raioSelecionado == opcao,
                     onSelected: (_) => _aoMudarRaio(opcao),
                     backgroundColor: Colors.white,
@@ -1308,13 +1339,36 @@ class _MapaScreenState extends State<MapaScreen> {
   }
 }
 
+/// Paleta de cores vivas usada para colorir cada cartão de subcategoria
+/// individualmente -- pedido explícito: "Implementar cor de ícone única e
+/// distinta para cada item do grid (usar lógica de índice para variar
+/// cores automaticamente)". Antes, TODOS os cartões de uma fileira usavam
+/// a mesma cor fixa (`AppColors.destaque`); agora `_CartaoSubcategoria`
+/// escolhe uma cor desta lista com `indice % length`, então cartões
+/// vizinhos praticamente nunca repetem cor -- e a lista "roda" (módulo)
+/// para categorias com mais subcategorias do que cores aqui, sem nunca
+/// estourar índice.
+const _paletaCoresSubcategoria = <Color>[
+  Colors.deepOrange,
+  Colors.indigo,
+  Colors.teal,
+  Colors.pink,
+  Colors.green,
+  Colors.amber,
+  Colors.blueAccent,
+  Colors.purple,
+  Colors.cyan,
+  Colors.brown,
+];
+
 /// Um cartão de subcategoria na fileira horizontal "Explore por
 /// especialidade" -- SEM foto (pedido explícito: "remova essas imagens
 /// também e deixe apenas ícones que façam referência às subclasses"), só
-/// um ícone temático (`_iconeParaSubcategoria`) sobre um círculo colorido,
-/// nome e contagem REAL de profissionais (`totalProfissionais`, já
-/// calculada pelo backend). Tocar já filtra o mapa por essa especialidade
-/// (ver `_aoMudarSubcategoria`).
+/// um ícone temático (`_iconeParaSubcategoria`) sobre um círculo colorido
+/// e o nome da subcategoria. A linha de contagem de profissionais ("X
+/// prof.") que existia aqui foi removida (pedido explícito: "Remover
+/// linha que exibe a contagem de profissionais"). Tocar já filtra o mapa
+/// por essa especialidade (ver `_aoMudarSubcategoria`).
 ///
 /// Sem largura própria -- quem define a largura é o `SizedBox` que o
 /// envolve em `_construirSecaoCategoria` (calculada ali a partir da
@@ -1327,11 +1381,17 @@ class _MapaScreenState extends State<MapaScreen> {
 class _CartaoSubcategoria extends StatelessWidget {
   final Categoria categoria;
   final Subcategoria subcategoria;
+  // Posição do cartão dentro da fileira da própria categoria -- é só o
+  // que decide a COR (ver `_paletaCoresSubcategoria` acima); o ícone
+  // continua vindo de `_iconeParaSubcategoria(subcategoria.nome,
+  // categoria.nome)`, sem nenhuma relação com este índice.
+  final int indice;
   final VoidCallback onTap;
 
   const _CartaoSubcategoria({
     required this.categoria,
     required this.subcategoria,
+    required this.indice,
     required this.onTap,
   });
 
@@ -1351,7 +1411,11 @@ class _CartaoSubcategoria extends StatelessWidget {
             final raioIcone = (largura * 0.32).clamp(22.0, 30.0);
             final tamanhoIcone = raioIcone * 0.92;
             final fonteNome = (largura * 0.135).clamp(10.5, 13.0);
-            final fonteContagem = fonteNome - 2;
+            // Cor DESTE cartão -- pedido explícito: "cor de ícone única e
+            // distinta para cada item do grid (usar lógica de índice para
+            // variar cores automaticamente)". Antes era sempre
+            // `AppColors.destaque`, igual em toda a fileira.
+            final cor = _paletaCoresSubcategoria[indice % _paletaCoresSubcategoria.length];
 
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
@@ -1360,10 +1424,10 @@ class _CartaoSubcategoria extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: raioIcone,
-                    backgroundColor: AppColors.destaque.withValues(alpha: 0.12),
+                    backgroundColor: cor.withValues(alpha: 0.12),
                     child: Icon(
                       _iconeParaSubcategoria(subcategoria.nome, categoria.nome),
-                      color: AppColors.destaque,
+                      color: cor,
                       size: tamanhoIcone,
                     ),
                   ),
@@ -1378,11 +1442,6 @@ class _CartaoSubcategoria extends StatelessWidget {
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${subcategoria.totalProfissionais} prof.',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: fonteContagem),
                   ),
                 ],
               ),
