@@ -68,9 +68,19 @@ UPDATE categorias SET nome = 'Outros Serviços'             WHERE nome = 'Servi�
 --  revalida a tabela inteira, então qualquer inconsistência real (não
 --  esperada aqui) ainda derrubaria a migração com erro, em vez de passar
 --  batido.
+--
+--  MESMA coisa vale para `fk_servicos_subcategoria_categoria` (migração 12,
+--  posterior a esta migração ter sido originalmente escrita): `servicos`
+--  também tem `categoria_id`/`subcategoria_id` com FK composta contra
+--  `subcategorias`, então qualquer serviço já registrado contra Chaveiro/
+--  Jardineiro/Piscineiro precisa da MESMA correção em cascata, ou o
+--  `UPDATE subcategorias` abaixo quebra com "violates foreign key
+--  constraint fk_servicos_subcategoria_categoria" -- exatamente o erro que
+--  apareceu ao tentar rodar esta migração sem esta seção.
 -- ============================================================================
 
 ALTER TABLE profissionais DROP CONSTRAINT IF EXISTS fk_profissionais_subcategoria_categoria;
+ALTER TABLE servicos DROP CONSTRAINT IF EXISTS fk_servicos_subcategoria_categoria;
 
 UPDATE subcategorias
 SET categoria_id = (SELECT categoria_id FROM categorias WHERE nome = 'Manutenção e Reformas (Lar)')
@@ -83,8 +93,24 @@ FROM subcategorias s
 WHERE p.subcategoria_id = s.subcategoria_id
   AND s.nome IN ('Chaveiro', 'Jardineiro', 'Piscineiro');
 
+-- `servicos.subcategoria_id`/`categoria_id` nascem NULOS (migração 12) --
+-- então só existe algo a corrigir aqui se algum serviço já foi registrado
+-- contra uma dessas três subcategorias (`WHERE s.subcategoria_id IS NOT
+-- NULL` é implícito no JOIN abaixo: `p.subcategoria_id = s.subcategoria_id`
+-- nunca bate numa linha com `subcategoria_id` nulo).
+UPDATE servicos sv
+SET categoria_id = s.categoria_id
+FROM subcategorias s
+WHERE sv.subcategoria_id = s.subcategoria_id
+  AND s.nome IN ('Chaveiro', 'Jardineiro', 'Piscineiro');
+
 ALTER TABLE profissionais
     ADD CONSTRAINT fk_profissionais_subcategoria_categoria
+    FOREIGN KEY (subcategoria_id, categoria_id)
+    REFERENCES subcategorias (subcategoria_id, categoria_id);
+
+ALTER TABLE servicos
+    ADD CONSTRAINT fk_servicos_subcategoria_categoria
     FOREIGN KEY (subcategoria_id, categoria_id)
     REFERENCES subcategorias (subcategoria_id, categoria_id);
 
