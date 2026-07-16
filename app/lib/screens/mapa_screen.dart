@@ -50,6 +50,16 @@ const _zoomAoSelecionarProfissional = 16.0;
 /// mudança de UMA linha, não uma caça por todo o arquivo.
 const _paddingHorizontal = 24.0;
 
+/// Distância do topo do `Stack` do mapa (topo do CABEÇALHO, não do cartão
+/// do mapa em si) até a barra de busca flutuante -- pedido explícito:
+/// "top margin (ex: 100 pixels) para ficar posicionado logo abaixo da
+/// saudação". 100 cai depois do conteúdo do cabeçalho (avatar + saudação,
+/// que termina bem antes disso) e já dentro da área onde o cartão do mapa
+/// é pintado por cima do cabeçalho (o cartão começa em 92, ver
+/// `topoDoCartao` em `_construirCabecalhoComMapa`) -- a barra flutua sobre
+/// a SUPERFÍCIE do mapa, logo abaixo da saudação.
+const _topBarraBuscaFlutuante = 100.0;
+
 /// Saudação por horário do dia -- troca o "Olá, Nome" cru de antes por algo
 /// que reage ao momento em que a pessoa está usando o app, mesmo detalhe
 /// pequeno que apps de referência (Uber, iFood) já usam no topo da tela
@@ -636,10 +646,21 @@ class _MapaScreenState extends State<MapaScreen> {
     return Scaffold(
       backgroundColor: AppColors.fundo,
       // `Column` (não mais um único `ListView`) de propósito: o pedido foi
-      // travar o cabeçalho + mapa + filtros no lugar, deixando só a grade
-      // de especialidades, mais abaixo, rolar. A parte de cima (até os
-      // chips de raio) fica FORA de qualquer `Scrollable` -- só o `Expanded`
-      // no fim da coluna rola, e é ele quem carrega o resto.
+      // travar o cabeçalho + mapa no lugar, deixando só a grade de
+      // especialidades, mais abaixo, rolar. A parte de cima fica FORA de
+      // qualquer `Scrollable` -- só o `Expanded` no fim da coluna rola, e é
+      // ele quem carrega o resto.
+      //
+      // Pedido explícito: "mover os campos de busca e os filtros para
+      // dentro do widget do mapa, criando uma experiência de sobreposição
+      // (overlay) flutuante". A barra de busca e a barra de filtros (antes
+      // duas faixas empilhadas AQUI, entre o mapa e a grade de categorias)
+      // agora moram DENTRO do `Stack` de `_construirCabecalhoComMapa`,
+      // como `Positioned` flutuando sobre o mapa -- ver os dois
+      // `Positioned` finais lá dentro, e `_construirBarraFiltrosFlutuante`
+      // logo abaixo desta classe. A lógica (`_aoMudarSubcategoria`,
+      // `_aoMudarOrdenacao`, `_aoMudarRaio`, toggle de raio) não mudou em
+      // NADA -- só o container visual que as hospeda.
       body: Column(
         children: [
           // `_construirCabecalhoComMapa` agora se embrulha num `SizedBox`
@@ -659,15 +680,7 @@ class _MapaScreenState extends State<MapaScreen> {
             corRaio: corRaio,
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              _paddingHorizontal,
-              0,
-              _paddingHorizontal,
-              8,
-            ),
-            child: _construirBarraDeBusca(context),
-          ),
+          const SizedBox(height: 8),
 
           // Contagem viva do resultado -- some durante o carregamento/erro
           // (a barra de progresso e a faixa de erro abaixo já cobrem esses
@@ -688,67 +701,6 @@ class _MapaScreenState extends State<MapaScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-
-          // Barra principal de ordenação: só os TRÊS botões fixos pedidos
-          // (requisito 1) -- "Mais próximos", "Melhor custo-benefício",
-          // "Melhores avaliados". Nada de raio aqui; o raio virou um
-          // SUB-filtro, que só aparece quando faz sentido (ver abaixo).
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final ordenacao in _OrdenacaoBusca.values)
-                  ChoiceChip(
-                    label: Text(ordenacao.rotulo),
-                    selected: _ordenacaoSelecionada == ordenacao,
-                    onSelected: (_) => _aoMudarOrdenacao(ordenacao),
-                  ),
-              ],
-            ),
-          ),
-
-          // Sub-filtro de raio (requisito 2): só existe -- visualmente --
-          // quando a ordenação é "Mais próximos". `AnimatedCrossFade` faz a
-          // transição pedida no requisito 3 (entra com fade + desliza pra
-          // baixo empurrando o resto, sai do mesmo jeito), sem precisar de
-          // `AnimatedContainer`/`AnimatedSize` manual: ele já anima altura E
-          // opacidade dos dois lados ao trocar `crossFadeState`.
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 220),
-            sizeCurve: Curves.easeInOut,
-            crossFadeState: _ordenacaoSelecionada == _OrdenacaoBusca.distancia
-                ? CrossFadeState.showFirst
-                : CrossFadeState.showSecond,
-            firstChild: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                _paddingHorizontal,
-                8,
-                _paddingHorizontal,
-                0,
-              ),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Icon(Icons.social_distance, size: 18, color: Colors.grey.shade600),
-                  for (final opcao in _OpcaoRaio.values)
-                    ChoiceChip(
-                      label: Text(opcao.rotulo),
-                      selected: _raioSelecionado == opcao,
-                      onSelected: (_) => _aoMudarRaio(opcao),
-                    ),
-                ],
-              ),
-            ),
-            // Placeholder de altura zero -- é o que faz o `AnimatedCrossFade`
-            // "colapsar" a linha inteira (não só esconder o conteúdo) quando
-            // a ordenação não é por distância.
-            secondChild: const SizedBox(width: double.infinity, height: 0),
-          ),
-          const SizedBox(height: 8),
 
           if (localizacao.erro != null)
             _AvisoFaixa(mensagem: localizacao.erro!, cor: Colors.orange),
@@ -1166,6 +1118,137 @@ class _MapaScreenState extends State<MapaScreen> {
               ),
             ),
           ),
+
+          // Barra de busca FLUTUANTE sobre o mapa -- pedido explícito:
+          // "criar um widget Positioned (flutuante) dentro do Stack,
+          // centralizado horizontalmente na parte superior do mapa", com
+          // um `top` que a deixe "logo abaixo da saudação". `top:
+          // _topBarraBuscaFlutuante` (100) cai depois do fim visual do
+          // conteúdo do cabeçalho (avatar + saudação, que termina bem
+          // antes disso) e dentro da área onde o cartão do mapa já está
+          // pintado por cima do cabeçalho (o cartão começa em
+          // `topoDoCartao`, 92) -- ou seja, a barra aparece flutuando
+          // sobre a SUPERFÍCIE do mapa, não mais empilhada abaixo dele.
+          // É o MESMO widget `_construirBarraDeBusca` de sempre (mesmo
+          // campo, mesma lógica de `_aoMudarSubcategoria`) -- só o
+          // `Positioned` que o hospeda é novo.
+          Positioned(
+            top: _topBarraBuscaFlutuante,
+            left: _paddingHorizontal,
+            right: _paddingHorizontal,
+            child: _construirBarraDeBusca(context),
+          ),
+
+          // Barra de filtros FLUTUANTE sobre o mapa, no rodapé -- pedido
+          // explícito: "um segundo widget Positioned, alinhado à parte
+          // inferior do mapa (bottom: 20)". Agrupa a linha de ordenação
+          // + o sub-filtro de raio + o ícone de filtros, que antes viviam
+          // empilhados numa faixa fixa ABAIXO do cartão do mapa -- ver
+          // `_construirBarraFiltrosFlutuante` logo abaixo desta classe
+          // para o conteúdo (a lógica de `_aoMudarOrdenacao`/`_aoMudarRaio`
+          // não mudou, só o container visual).
+          Positioned(
+            left: _paddingHorizontal,
+            right: _paddingHorizontal,
+            bottom: 20,
+            child: _construirBarraFiltrosFlutuante(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Barra de filtros FLUTUANTE (ordenação + raio + ícone de filtro) --
+  /// pedido explícito: mover a linha "Mais próximos" / "Melhor
+  /// custo-benefício" / "Melhores avaliados" e o sub-filtro de raio ("Até
+  /// 2km" ... "Mais que 15km") para DENTRO de um cartão flutuante sobre o
+  /// mapa, no rodapé dele, em vez de ficarem empilhados numa faixa fixa
+  /// abaixo do cartão do mapa. A LÓGICA é exatamente a mesma de sempre
+  /// (`_aoMudarOrdenacao`/`_aoMudarRaio`, toggle de raio, o sub-filtro só
+  /// aparecendo quando a ordenação é "Mais próximos" via
+  /// `AnimatedCrossFade`) -- só o container visual mudou.
+  ///
+  /// Cada fileira de chips rola HORIZONTALMENTE dentro do cartão (em vez
+  /// de um `Wrap`, que quebraria linha e deixaria o cartão flutuante alto
+  /// demais sobre o mapa) -- garante que todos os chips cabem sem quebrar
+  /// o layout, não importa quantos existam.
+  Widget _construirBarraFiltrosFlutuante(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Ícone de filtro + linha de ordenação, os TRÊS botões fixos
+          // "Mais próximos" / "Melhor custo-benefício" / "Melhores
+          // avaliados" -- pedido explícito: "o ícone de filtros (o
+          // símbolo de |:| à esquerda) também deve ser incluído dentro
+          // deste contêiner flutuante".
+          SizedBox(
+            height: 36,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                Icon(Icons.tune, size: 20, color: Colors.grey.shade700),
+                const SizedBox(width: 10),
+                for (final ordenacao in _OrdenacaoBusca.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(ordenacao.rotulo),
+                      selected: _ordenacaoSelecionada == ordenacao,
+                      onSelected: (_) => _aoMudarOrdenacao(ordenacao),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // Sub-filtro de raio: só existe -- visualmente -- quando a
+          // ordenação é "Mais próximos". Mesmo `AnimatedCrossFade` de
+          // sempre (entra/sai com fade + colapso de altura).
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 220),
+            sizeCurve: Curves.easeInOut,
+            crossFadeState: _ordenacaoSelecionada == _OrdenacaoBusca.distancia
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            firstChild: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SizedBox(
+                height: 36,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final opcao in _OpcaoRaio.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(opcao.rotulo),
+                          selected: _raioSelecionado == opcao,
+                          onSelected: (_) => _aoMudarRaio(opcao),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // Placeholder de altura zero -- é o que faz o `AnimatedCrossFade`
+            // "colapsar" a linha inteira (não só esconder o conteúdo) quando
+            // a ordenação não é por distância.
+            secondChild: const SizedBox(width: double.infinity, height: 0),
+          ),
         ],
       ),
     );
@@ -1177,15 +1260,21 @@ class _MapaScreenState extends State<MapaScreen> {
   /// cinza + borda, ver `app_theme.dart`) só aqui, porque o fundo já vem do
   /// `Container` branco por fora -- sem isso, ficaria "cinza dentro de
   /// branco", um campo dentro do outro.
+  ///
+  /// Agora usado como OVERLAY flutuante sobre o mapa (ver o `Positioned`
+  /// em `_construirCabecalhoComMapa`) -- `BorderRadius.circular(30)`
+  /// (pedido explícito, em vez do `AppRadius.lg` usado no resto do app) dá
+  /// o formato de "pílula" mais arredondado que reforça o efeito de
+  /// flutuação sobre o mapa.
   Widget _construirBarraDeBusca(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 14,
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
