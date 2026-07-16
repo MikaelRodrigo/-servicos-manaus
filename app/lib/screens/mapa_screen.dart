@@ -223,10 +223,15 @@ IconData _iconeParaSubcategoria(String nomeSubcategoria, String nomeCategoria) {
 /// é mais uma largura fixa em pixels.
 const _cartoesVisiveisPorFileira = 4;
 
-/// Altura fixa de cada cartão -- agora só ícone + nome + contagem (sem
-/// foto de fundo, ver `_CartaoSubcategoria`), bem mais baixo do que quando
-/// precisava caber uma imagem.
-const _alturaCartaoSubcategoria = 108.0;
+/// Altura fixa de cada cartão -- ícone + nome (até 2 linhas) + contagem.
+/// 132 (não mais 108) porque 108 não sobrava espaço suficiente para o
+/// conteúdo no tamanho máximo do ícone/fonte (ver `_CartaoSubcategoria`,
+/// que escala com a largura do cartão): o Column ficava mais alto do que o
+/// cartão, e o Flutter desenhava a faixa de aviso de "overflow" (listras
+/// pretas/amarelas com texto em vermelho) bem em cima do nome da
+/// subcategoria -- o que o usuário relatou como "umas letrinhas em
+/// vermelho que atrapalham a leitura da subclasse".
+const _alturaCartaoSubcategoria = 132.0;
 
 /// Espaçamento entre os cartões da fileira horizontal.
 const _espacamentoCartaoSubcategoria = 10.0;
@@ -792,21 +797,11 @@ class _MapaScreenState extends State<MapaScreen> {
                 // profissionais (soma das subcategorias, já calculada pelo
                 // backend em `GET /categorias`) -- nunca uma nota ou foto
                 // inventada.
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-                  child: Text(
-                    'Explore por especialidade',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: _paddingHorizontal),
-                  child: Text(
-                    'Toque numa especialidade para ver quem atende perto de você',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
+                // Pedido explícito: remover o título "Explore por
+                // especialidade" e o subtítulo "Toque numa especialidade
+                // para ver quem atende perto de você" -- a grade de
+                // categorias abaixo passa a começar direto, sem esse texto
+                // de introdução.
                 const SizedBox(height: 14),
                 if (_categorias.isEmpty)
                   const Padding(
@@ -1262,7 +1257,7 @@ class _CartaoSubcategoria extends StatelessWidget {
             final fonteContagem = fonteNome - 2;
 
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -1275,7 +1270,7 @@ class _CartaoSubcategoria extends StatelessWidget {
                       size: tamanhoIcone,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     subcategoria.nome,
                     textAlign: TextAlign.center,
