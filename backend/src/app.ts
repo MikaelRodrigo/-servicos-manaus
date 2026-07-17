@@ -8,9 +8,11 @@ import { servicosRouter } from './routes/servicos.routes';
 import { curtidasRouter } from './routes/curtidas.routes';
 import { categoriasRouter } from './routes/categorias.routes';
 import { cepRouter } from './routes/cep.routes';
+import { pagamentosRouter } from './routes/pagamentos.routes';
 import { ErroDeValidacao, ErroDeConflito, ErroNaoEncontrado } from './utils/validacao';
 import { ErroDeAutenticacao } from './middlewares/autenticacao';
 import { ehErroDeUpload, mensagemDeErroUpload } from './middlewares/upload';
+import { ErroDeGateway } from './services/gateway-pagamento';
 
 export const app = express();
 
@@ -27,7 +29,24 @@ app.use(cors());
 
 // Faz o parse de body JSON. Limite baixo: nenhuma rota nossa recebe
 // payload grande, e sem limite alguém te manda 500MB num POST.
-app.use(express.json({ limit: '100kb' }));
+//
+// `verify` -- guarda os BYTES CRUS do body em `req.rawBody` antes do parse,
+// além do parse normal continuar acontecendo (`req.body` funciona em toda
+// rota exatamente como sempre funcionou). Existe só para o webhook de
+// pagamentos (`routes/pagamentos.routes.ts`): a assinatura HMAC que o
+// Pagar.me manda é calculada sobre os bytes EXATOS da requisição --
+// reserializar `req.body` de volta com `JSON.stringify` não reproduz
+// necessariamente o mesmo texto (ordem de chaves, espaçamento), então
+// validar contra o objeto já parseado seria frágil. Nenhuma outra rota
+// paga custo por isso além de guardar uma referência ao Buffer.
+app.use(
+  express.json({
+    limit: '100kb',
+    verify: (req, _res, buf) => {
+      (req as Request).rawBody = buf;
+    },
+  }),
+);
 
 // Log simples de request. Na Etapa 5 trocamos por pino/morgan.
 app.use((req, _res, next) => {
@@ -51,6 +70,7 @@ app.use('/servicos', servicosRouter);
 app.use('/avaliacoes', curtidasRouter);
 app.use('/categorias', categoriasRouter);
 app.use('/cep', cepRouter);
+app.use('/pagamentos', pagamentosRouter);
 
 /* ---------------------------------------------------------------------------
    404 - qualquer rota não registrada acima cai aqui.
@@ -90,6 +110,15 @@ app.use((erro: unknown, _req: Request, res: Response, _next: NextFunction) => {
   // Erro do multer (arquivo grande demais, campo errado etc.) -> 400.
   if (ehErroDeUpload(erro)) {
     return res.status(400).json({ erro: mensagemDeErroUpload(erro) });
+  }
+
+  // Gateway de pagamento recusou/falhou/está fora do ar, ou as credenciais
+  // não estão configuradas -> 502 (Bad Gateway). Loga o detalhe completo
+  // no servidor (pode conter informação de diagnóstico do gateway que não
+  // deveria ir para o cliente final) e devolve uma mensagem genérica.
+  if (erro instanceof ErroDeGateway) {
+    console.error('[erro] Gateway de pagamento:', erro.message);
+    return res.status(502).json({ erro: 'Não foi possível completar a operação de pagamento agora.' });
   }
 
   // Qualquer outra coisa é bug NOSSO. Loga completo no servidor...

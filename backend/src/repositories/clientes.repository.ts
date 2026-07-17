@@ -48,6 +48,35 @@ export async function buscarMeuPerfil(clienteId: string): Promise<PerfilCliente 
   return rows[0] ?? null;
 }
 
+/**
+ * Dados MÍNIMOS exigidos pelo gateway de pagamento (migração 14 / Etapa A)
+ * para criar o `customer` do pedido -- nome, e-mail e documento (CPF ou
+ * CNPJ, o que existir). Função separada de `buscarMeuPerfil` de propósito:
+ * aquela é para a TELA de perfil (não expõe CPF/CNPJ cru); esta é
+ * consumida só pelo backend, internamente, na hora de montar o payload do
+ * gateway (`routes/pagamentos.routes.ts`).
+ */
+export interface DadosClienteParaGateway {
+  nome: string;
+  email: string;
+  documento: string;
+}
+
+export async function buscarDadosClienteParaGateway(
+  clienteId: string,
+): Promise<DadosClienteParaGateway | null> {
+  const { rows } = await pool.query<DadosClienteParaGateway>(
+    `SELECT
+       COALESCE(nome, razao_social) AS nome,
+       email,
+       COALESCE(cpf, cnpj) AS documento
+     FROM clientes
+     WHERE cliente_id = $1`,
+    [clienteId],
+  );
+  return rows[0] ?? null;
+}
+
 /** O que a rota de edição entrega. `undefined` num campo = "não mexa nele". */
 export interface AtualizacaoPerfilCliente {
   contato?: string;

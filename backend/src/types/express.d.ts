@@ -19,6 +19,19 @@ declare global {
     interface Request {
       /** Presente SOMENTE depois que o middleware `exigirAutenticacao` rodou. */
       usuario?: PayloadToken;
+
+      /**
+       * Bytes CRUS do body, antes do `express.json()` desserializar --
+       * preenchido pelo `verify` callback em `app.ts`. Existe só para o
+       * webhook de pagamentos (`routes/pagamentos.routes.ts`): a
+       * assinatura HMAC do Pagar.me (`X-Hub-Signature-256`) é calculada
+       * sobre os bytes EXATOS que o gateway enviou -- reserializar
+       * `req.body` de volta para JSON (`JSON.stringify`) não garante o
+       * mesmo texto byte a byte (ordem de chaves, espaçamento), então
+       * validar a assinatura contra o objeto já parseado seria frágil.
+       * Qualquer outra rota pode ignorar este campo.
+       */
+      rawBody?: Buffer;
     }
   }
 }

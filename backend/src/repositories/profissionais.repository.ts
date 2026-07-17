@@ -563,3 +563,27 @@ export async function removerTagDoProfissional(
   );
   return listarTagsDoProfissional(profissionalId);
 }
+
+/**
+ * `chave_pix`/`id_recebedor_gateway` -- as duas colunas da migração 14
+ * (Split de Pagamento). Função dedicada (em vez de acrescentar essas
+ * colunas em `buscarPerfilPublico`) porque isto é consumido só pelo
+ * BACKEND internamente, na hora de liberar um repasse
+ * (`routes/pagamentos.routes.ts`) -- nunca deveria vazar no perfil público
+ * que qualquer visitante do app consegue ver.
+ */
+export interface DadosProfissionalParaGateway {
+  chavePix: string | null;
+  idRecebedorGateway: string | null;
+}
+
+export async function buscarDadosProfissionalParaGateway(
+  profissionalId: string,
+): Promise<DadosProfissionalParaGateway | null> {
+  const { rows } = await pool.query<{ chave_pix: string | null; id_recebedor_gateway: string | null }>(
+    `SELECT chave_pix, id_recebedor_gateway FROM profissionais WHERE profissional_id = $1`,
+    [profissionalId],
+  );
+  if (!rows[0]) return null;
+  return { chavePix: rows[0].chave_pix, idRecebedorGateway: rows[0].id_recebedor_gateway };
+}

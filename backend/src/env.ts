@@ -65,4 +65,27 @@ export const env = {
     // abrir -- ver `middlewares/upload.ts`, que monta a URL final com isto.
     publicUrlBase: obrigatoria('S3_PUBLIC_URL_BASE'),
   },
+
+  // Gateway de pagamento (migração 14 -- Escrow + Split). DIFERENTE de todo
+  // o resto deste arquivo: as duas chaves aqui NÃO são `obrigatoria(...)`.
+  // Se fossem, o servidor inteiro recusaria subir para qualquer dev/
+  // ambiente que ainda não tenha uma conta Pagar.me configurada -- e hoje
+  // isso é a maioria (o módulo de pagamentos é aditivo, o resto do app
+  // funciona sem ele). Em vez disso, a ausência só vira erro NA HORA de
+  // efetivamente chamar o gateway (ver `services/gateway-pagamento.ts`,
+  // `exigirCredenciais()`) -- um servidor sem Pagar.me configurado sobe
+  // normalmente; só as rotas de /pagamentos que dependem do gateway falham,
+  // com uma mensagem clara.
+  pagarme: {
+    // Chave secreta da API (formato "sk_..." em produção, "sk_test_..." em
+    // sandbox) -- ver https://docs.pagar.me/docs/chaves-de-acesso. Usada
+    // como usuário em HTTP Basic Auth (senha vazia), conforme a API v5.
+    apiKey: process.env.PAGARME_API_KEY,
+    // Segredo usado para validar a assinatura HMAC de cada webhook
+    // recebido (cabeçalho `X-Hub-Signature-256`) -- sem isso, QUALQUER UM
+    // que descubra a URL do webhook conseguiria forjar um "pagamento
+    // autorizado" falso. Configurado no painel do Pagar.me, na tela do
+    // próprio webhook.
+    webhookSecret: process.env.PAGARME_WEBHOOK_SECRET,
+  },
 } as const;

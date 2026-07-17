@@ -327,3 +327,87 @@ export function notaObrigatoria(valor: unknown, campo: string): number {
   }
   return n;
 }
+
+/* ============================================================================
+   VALIDADORES DO MÓDULO DE PAGAMENTOS (migração 14 --
+   14_pagamentos_escrow_split.sql)
+
+   Cada `*_VALIDOS`/`type Status*` abaixo espelha, 1:1, um ENUM do banco.
+   Mesma regra de sempre: o Postgres não expõe o próprio schema para o
+   TypeScript, então um enum novo no SQL PRECISA ser copiado aqui também --
+   nada aqui é derivado automaticamente.
+   ========================================================================= */
+
+export const STATUS_TRANSACAO_VALIDOS = [
+  'PENDENTE',
+  'AUTORIZADA',
+  'FALHOU',
+  'EM_DISPUTA',
+  'LIBERADA',
+  'REEMBOLSADA',
+] as const;
+export type StatusTransacao = (typeof STATUS_TRANSACAO_VALIDOS)[number];
+
+export const METODO_PAGAMENTO_VALIDOS = ['PIX', 'CARTAO'] as const;
+export type MetodoPagamento = (typeof METODO_PAGAMENTO_VALIDOS)[number];
+
+export const STATUS_ESCROW_VALIDOS = ['RETIDO', 'LIBERADO', 'REEMBOLSADO'] as const;
+export type StatusEscrow = (typeof STATUS_ESCROW_VALIDOS)[number];
+
+export const STATUS_DISPUTA_VALIDOS = [
+  'ABERTA',
+  'EM_MEDIACAO',
+  'RESOLVIDA_CLIENTE',
+  'RESOLVIDA_PROFISSIONAL',
+] as const;
+export type StatusDisputa = (typeof STATUS_DISPUTA_VALIDOS)[number];
+
+export const STATUS_NOTA_FISCAL_VALIDOS = ['PENDENTE', 'EMITIDA', 'ERRO'] as const;
+export type StatusNotaFiscal = (typeof STATUS_NOTA_FISCAL_VALIDOS)[number];
+
+/** enum literal 'PIX' | 'CARTAO' vindo de BODY -- qualquer outra coisa é 400. */
+export function metodoPagamentoObrigatorio(valor: unknown, campo = 'metodo_pagamento'): MetodoPagamento {
+  if (valor !== 'PIX' && valor !== 'CARTAO') {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser "PIX" ou "CARTAO". Recebido: ${valor}.`);
+  }
+  return valor;
+}
+
+/**
+ * Parcelas -- só faz sentido para CARTAO (ver `chk_transacao_parcelas_coerentes`
+ * na migração 14: PIX é sempre 1x). Aceita ausência (padrão 1), mas nunca
+ * aceita um valor fora de 1-12 -- 12x é o teto comum de qualquer adquirente
+ * brasileira; um valor maior quase certo é erro de input, não uma parcela
+ * real que o gateway aceitaria.
+ */
+export function parcelasOpcional(valor: unknown, campo = 'parcelas'): number {
+  if (valor === undefined || valor === null) return 1;
+  const n = numeroDoBody(valor, campo);
+  if (!Number.isInteger(n) || n < 1 || n > 12) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser um número inteiro de 1 a 12.`);
+  }
+  return n;
+}
+
+/**
+ * Valor monetário em BODY JSON, como STRING decimal ("49.90") -- de
+ * propósito NÃO aceita `number` aqui (diferente de `numeroDoBody`): um
+ * valor monetário que chega como `number` já passou por uma
+ * (des)serialização em float64 do lado do cliente, o que é exatamente o
+ * problema que `utils/dinheiro.ts` documenta. Exigir string obriga quem
+ * chama esta API a mandar o valor formatado por extenso ("49.90", não
+ * `49.9` nem `49.900000000000006`), que é o único formato que
+ * `valorParaCentavos` consegue converter sem ambiguidade.
+ */
+export function valorMonetarioObrigatorio(valor: unknown, campo: string): string {
+  if (typeof valor !== 'string' || !/^\d+(\.\d{1,2})?$/.test(valor.trim())) {
+    throw new ErroDeValidacao(
+      `O campo "${campo}" deve ser um valor monetário em texto, com até 2 casas decimais (ex.: "49.90"). Recebido: ${JSON.stringify(valor)}.`,
+    );
+  }
+  const texto = valor.trim();
+  if (Number(texto) <= 0) {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser maior que zero.`);
+  }
+  return texto;
+}
