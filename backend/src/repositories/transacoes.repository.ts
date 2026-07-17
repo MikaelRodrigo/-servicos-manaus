@@ -236,16 +236,16 @@ export function marcarEmDisputa(idTransacao: string): Promise<boolean> {
  * profissional) -> LIBERADA, grava o valor de repasse e fecha a retenção
  * do Escrow -- de novo, tudo numa transação de banco só.
  *
- * `valorRepasseOverride` -- quando informado (resolução de disputa com
- * `flag_dano`, ver checklist), usa ESSE valor em vez do cálculo padrão
- * (valor_servico - taxa_plataforma). Deixamos o cálculo padrão acontecer
- * em SQL (`valor_servico - taxa_plataforma`, aritmética NUMERIC exata),
- * nunca em JS -- ver utils/dinheiro.ts sobre por que.
+ * O valor de repasse é SEMPRE `valor_servico - taxa_plataforma`, calculado
+ * em SQL (aritmética NUMERIC exata, nunca em JS -- ver utils/dinheiro.ts
+ * sobre por que). Uma versão anterior desta função aceitava um valor
+ * "override" para o caso de uma disputa com desconto por dano -- removido
+ * de propósito junto com o resto dessa funcionalidade (ver o comentário no
+ * topo de disputas.repository.ts).
  */
 export async function marcarLiberada(
   idTransacao: string,
   statusEsperado: 'AUTORIZADA' | 'EM_DISPUTA',
-  valorRepasseOverride?: string,
 ): Promise<boolean> {
   const client = await pool.connect();
   try {
@@ -255,11 +255,11 @@ export async function marcarLiberada(
       `UPDATE transacoes
           SET status = 'LIBERADA'::status_transacao_enum,
               liberada_em = NOW(),
-              valor_repasse_profissional = COALESCE($3::numeric, valor_servico - taxa_plataforma)
+              valor_repasse_profissional = valor_servico - taxa_plataforma
         WHERE id_transacao = $1
           AND status = $2::status_transacao_enum
         RETURNING id_transacao`,
-      [idTransacao, statusEsperado, valorRepasseOverride ?? null],
+      [idTransacao, statusEsperado],
     );
 
     if ((rowCount ?? 0) === 0) {

@@ -143,9 +143,8 @@ CREATE TABLE transacoes (
     -- ---------- Split (Etapa D) ----------
     -- Taxa da plataforma É conhecida desde a autorização (regra de
     -- negócio fixa), mas o valor de repasse só é CALCULADO/CONGELADO no
-    -- momento da liberação -- fica NULL até lá de propósito, porque uma
-    -- disputa com `flag_dano` (Seção 6) pode reduzir esse valor em
-    -- relação à conta "ingênua" (valor_servico - taxa_plataforma).
+    -- momento da liberação -- fica NULL até lá de propósito (só existe de
+    -- verdade depois que a liberação acontece).
     taxa_plataforma             NUMERIC(10, 2) NOT NULL DEFAULT 0,
     valor_repasse_profissional  NUMERIC(10, 2),
 
@@ -274,9 +273,15 @@ COMMENT ON TABLE retencoes_escrow IS
 --  SEÇÃO 6 - TABELA: disputas_transacao (mediação da Etapa C)
 --
 --  "O cliente deve ter a opção REPORT_ISSUE. Se acionada, o fluxo de
---  liberação trava e abre um ticket para mediação, retendo o valor" +
---  checklist item 3 (cálculo de dano: profissional perde 30%, plataforma
---  reembolsa 20% extra ao cliente). Uma linha por chamado aberto.
+--  liberação trava e abre um ticket para mediação, retendo o valor."
+--  Uma linha por chamado aberto.
+--
+--  Removido de propósito: o cálculo automático de dano (desconto de 30%
+--  do profissional / reembolso de 20% extra da plataforma) que uma versão
+--  anterior desta migração incluía aqui -- decisão explícita de tirar essa
+--  funcionalidade da estrutura de banco. A resolução da disputa (Etapa C)
+--  continua existindo (`status`, `resolucao_observacao`, `resolvido_em`),
+--  só sem nenhum valor de ajuste automático embutido no schema.
 -- ============================================================================
 
 CREATE TABLE disputas_transacao (
@@ -291,14 +296,6 @@ CREATE TABLE disputas_transacao (
 
     motivo                    TEXT NOT NULL,
     status                     status_disputa_enum NOT NULL DEFAULT 'ABERTA',
-
-    -- ---------- Cálculo de dano (checklist item 3) ----------
-    flag_dano                  BOOLEAN NOT NULL DEFAULT FALSE,
-    -- "Valor_Profissional = Total - 30%" / "Reembolso_Plataforma = +20%
-    -- extra" -- ficam NULOS até a MEDIAÇÃO decidir (não são calculados na
-    -- abertura do chamado, só na resolução, pelo backend).
-    valor_profissional_ajustado         NUMERIC(10, 2),
-    valor_reembolso_extra_plataforma    NUMERIC(10, 2),
 
     resolucao_observacao      TEXT,
     resolvido_em               TIMESTAMPTZ,
@@ -323,14 +320,6 @@ CREATE TABLE disputas_transacao (
         REFERENCES clientes (cliente_id)
         ON DELETE RESTRICT
         ON UPDATE CASCADE,
-
-    -- Os dois valores de ajuste só existem quando HÁ dano -- mesmo padrão
-    -- de completude condicional usado em `chk_prof_coords_completas`
-    -- (Etapa 1) e `chk_servico_categoria_completa` (migração 12).
-    CONSTRAINT chk_disputa_valores_apenas_com_dano CHECK (
-        flag_dano = TRUE
-        OR (valor_profissional_ajustado IS NULL AND valor_reembolso_extra_plataforma IS NULL)
-    ),
 
     CONSTRAINT chk_disputa_resolucao_completa CHECK (
         (status IN ('RESOLVIDA_CLIENTE', 'RESOLVIDA_PROFISSIONAL') AND resolvido_em IS NOT NULL)

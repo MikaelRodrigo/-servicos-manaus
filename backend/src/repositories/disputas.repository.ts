@@ -4,14 +4,18 @@ import { StatusDisputa } from '../utils/validacao';
 /* ============================================================================
    `disputas_transacao` (migração 14) -- o ticket de mediação aberto pelo
    REPORT_ISSUE do cliente (Etapa C). Este arquivo só cobre ABERTURA da
-   disputa -- a RESOLUÇÃO (mediação decidindo a favor de um lado, aplicando
-   o cálculo de dano do checklist) fica de fora de propósito: resolver uma
-   disputa é uma ação administrativa, e o projeto ainda não tem um papel
-   "admin" no sistema de autenticação (`Papel = 'cliente' | 'profissional'`,
-   ver utils/jwt.ts) -- não dá para proteger esse endpoint corretamente sem
-   inventar um mecanismo de auth novo, o que é uma decisão de produto, não
-   um detalhe de implementação. `marcarEmMediacaoOuResolvida` abaixo existe
-   pronta para quando isso for decidido.
+   disputa -- a RESOLUÇÃO (mediação decidindo a favor de um lado) fica de
+   fora de propósito: resolver uma disputa é uma ação administrativa, e o
+   projeto ainda não tem um papel "admin" no sistema de autenticação
+   (`Papel = 'cliente' | 'profissional'`, ver utils/jwt.ts) -- não dá para
+   proteger esse endpoint corretamente sem inventar um mecanismo de auth
+   novo, o que é uma decisão de produto, não um detalhe de implementação.
+   `resolverDisputa` abaixo existe pronta para quando isso for decidido.
+
+   REMOVIDO DE PROPÓSITO: o cálculo automático de dano (desconto de 30% do
+   profissional / reembolso de 20% extra da plataforma) que uma versão
+   anterior tinha aqui -- decisão explícita de tirar essa funcionalidade,
+   tanto do banco (ver migração 14) quanto deste repository.
    ========================================================================= */
 
 export interface Disputa {
@@ -21,9 +25,6 @@ export interface Disputa {
   aberto_por_cliente_id: string;
   motivo: string;
   status: StatusDisputa;
-  flag_dano: boolean;
-  valor_profissional_ajustado: string | null;
-  valor_reembolso_extra_plataforma: string | null;
   resolucao_observacao: string | null;
   resolvido_em: string | null;
   created_at: string;
@@ -33,9 +34,6 @@ export interface Disputa {
 const SELECT_DISPUTA = `
   SELECT
     id_disputa, id_transacao, id_servico, aberto_por_cliente_id, motivo, status,
-    flag_dano,
-    valor_profissional_ajustado::text,
-    valor_reembolso_extra_plataforma::text,
     resolucao_observacao, resolvido_em, created_at, updated_at
   FROM disputas_transacao
 `;
@@ -85,46 +83,27 @@ export async function abrirDisputa(dados: {
 
 /**
  * Resolve o ticket -- PRONTA PARA USO FUTURO, ainda sem rota que a chame
- * (ver comentário no topo do arquivo). `valorProfissionalAjustado`/
- * `valorReembolsoExtraPlataforma` só podem ser informados quando
- * `flagDano` é `true` (mesmo CHECK do banco, `chk_disputa_valores_apenas_com_dano`
- * -- o Postgres recusaria de qualquer forma, isto só evita a viagem ao
- * banco para descobrir isso).
+ * (ver comentário no topo do arquivo). Só marca QUEM ganhou a mediação e
+ * a observação; não existe mais nenhum cálculo de valor automático embutido
+ * aqui (ver nota "REMOVIDO DE PROPÓSITO" no topo do arquivo) -- se um dia a
+ * mediação precisar ajustar valores, isso é responsabilidade de quem
+ * chama esta função (a rota), não deste repository.
  */
 export async function resolverDisputa(
   idDisputa: string,
   dados: {
     resolucao: 'RESOLVIDA_CLIENTE' | 'RESOLVIDA_PROFISSIONAL';
-    flagDano: boolean;
-    valorProfissionalAjustado?: string;
-    valorReembolsoExtraPlataforma?: string;
     observacao?: string;
   },
 ): Promise<boolean> {
-  if (!dados.flagDano && (dados.valorProfissionalAjustado || dados.valorReembolsoExtraPlataforma)) {
-    throw new Error(
-      '[disputas] valorProfissionalAjustado/valorReembolsoExtraPlataforma só podem ser informados com flagDano=true.',
-    );
-  }
-
   const { rowCount } = await pool.query(
     `UPDATE disputas_transacao
         SET status = $2::status_disputa_enum,
-            flag_dano = $3,
-            valor_profissional_ajustado = $4::numeric,
-            valor_reembolso_extra_plataforma = $5::numeric,
-            resolucao_observacao = $6,
+            resolucao_observacao = $3,
             resolvido_em = NOW()
       WHERE id_disputa = $1
         AND status = ANY(ARRAY['ABERTA','EM_MEDIACAO']::status_disputa_enum[])`,
-    [
-      idDisputa,
-      dados.resolucao,
-      dados.flagDano,
-      dados.valorProfissionalAjustado ?? null,
-      dados.valorReembolsoExtraPlataforma ?? null,
-      dados.observacao ?? null,
-    ],
+    [idDisputa, dados.resolucao, dados.observacao ?? null],
   );
   return (rowCount ?? 0) > 0;
 }

@@ -262,7 +262,7 @@ function interpretarRespostaPedido(pedido: RespostaPedidoPagarme): ResultadoAuto
 export interface DadosParaLiberarRepasse {
   /** Subconta do profissional -- `profissionais.id_recebedor_gateway`. */
   idRecebedorGateway: string;
-  /** Valor a transferir, já calculado (valor_servico - taxa_plataforma, ou o valor ajustado por uma disputa com flag_dano). */
+  /** Valor a transferir, já calculado (valor_servico - taxa_plataforma). */
   valorRepasse: string;
 }
 
