@@ -1,16 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Tokens de design centralizados do app -- é AQUI que qualquer ajuste
-/// visual (cor, raio, espaçamento) deve ser feito. Nenhuma tela deveria
-/// precisar declarar sua própria cor/raio/sombra: ela só usa o que o
-/// `Theme.of(context)` já entrega (via `construirTemaClaro()` abaixo),
-/// registrado uma única vez em `main.dart`.
-///
-/// Objetivo do redesign: cartões com cantos bem arredondados e sombra
-/// suave (em vez de borda sólida), paleta neutra (cinza claro/branco) com
-/// UMA cor de destaque para ações, tipografia com bom espaçamento entre
-/// linhas, e uma transição suave ao passar o mouse/tocar em botões e
-/// cartões.
+/// Tokens de design centralizados do app.
+/// Ajustado para uma cor de destaque mais vibrante e viva.
 class AppRadius {
   AppRadius._();
 
@@ -23,10 +14,8 @@ class AppRadius {
 class AppColors {
   AppColors._();
 
-  /// Única cor de destaque do app (botões de ação, ícones selecionados,
-  /// indicador da barra de navegação). Um teal moderno -- não é a cor
-  /// "padrão" do Material, escolhida para fugir do visual genérico.
-  static const Color destaque = Color(0xFF12A594);
+  /// Nova cor de destaque: Azul Elétrico mais vibrante
+  static const Color destaque = Color(0xFF007AFF);
 
   static const Color fundo = Color(0xFFF6F7F9);
   static const Color superficie = Colors.white;
@@ -36,9 +25,6 @@ class AppColors {
   static const Color textoSecundario = Color(0xFF667085);
 }
 
-/// Duração padrão das transições de hover/toque em botões e cartões --
-/// suave o bastante para parecer intencional, rápida o bastante para não
-/// atrapalhar quem está tocando na tela repetidamente.
 const Duration duracaoTransicaoInterativa = Duration(milliseconds: 220);
 
 ThemeData construirTemaClaro() {
@@ -74,11 +60,6 @@ ThemeData construirTemaClaro() {
       ),
     ),
 
-    // Cartões: cantos bem arredondados (16px) + sombra difusa em vez de
-    // borda. `surfaceTintColor: transparent` evita o "tingimento" que o
-    // Material 3 aplicaria por padrão (deixaria os cards meio arroxeados) --
-    // queremos branco/cinza neutro de verdade, não uma cor emprestada da
-    // paleta de destaque.
     cardTheme: CardThemeData(
       color: AppColors.superficie,
       elevation: 3,
@@ -89,10 +70,6 @@ ThemeData construirTemaClaro() {
       shape: RoundedRectangleBorder(borderRadius: radiusCartao),
     ),
 
-    // Campos de entrada: preenchidos com cinza bem claro, SEM borda visível
-    // em repouso (troca "linha" por "área"), com um contorno na cor de
-    // destaque só quando o campo está focado -- feedback claro sem poluir
-    // a tela toda com bordas.
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.superficieSecundaria,
@@ -126,8 +103,6 @@ ThemeData construirTemaClaro() {
         textStyle: const WidgetStatePropertyAll(
           TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.2),
         ),
-        // Sombra cresce sutilmente no hover (mouse) -- feedback "elevação"
-        // sem precisar de nenhum pacote extra.
         elevation: WidgetStateProperty.resolveWith((estados) {
           if (estados.contains(WidgetState.hovered)) return 6;
           if (estados.contains(WidgetState.pressed)) return 1;
@@ -202,9 +177,6 @@ ThemeData construirTemaClaro() {
       side: BorderSide.none,
     ),
 
-    // Divisórias mais discretas -- linha fina e clara, com bastante espaço
-    // ao redor, em vez da linha padrão do Material (mais escura, mais
-    // "presente" do que o design pede).
     dividerTheme: const DividerThemeData(
       color: AppColors.bordaSutil,
       thickness: 1,
@@ -255,14 +227,10 @@ ThemeData construirTemaClaro() {
       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     ),
 
-    iconTheme: const IconThemeData(color: AppColors.textoPrimario),
+    iconTheme: const IconThemeData(color: Color.fromARGB(255, 151, 143, 73)),
   );
 }
 
-/// Tipografia sem serifa (Roboto, já padrão do Flutter/Android -- evita
-/// depender de baixar uma fonte externa em tempo de execução) com peso e
-/// altura de linha ajustados para "respirar" mais do que o padrão do
-/// Material, que é bem apertado.
 TextTheme _construirTextTheme() {
   const cor = AppColors.textoPrimario;
   const corSecundaria = AppColors.textoSecundario;
@@ -285,5 +253,3 @@ TextTheme _construirTextTheme() {
     labelSmall: TextStyle(color: corSecundaria, height: 1.3, fontWeight: FontWeight.w500),
   );
 }
-
-
