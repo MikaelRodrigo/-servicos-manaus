@@ -16,29 +16,16 @@ import 'servicos_screen.dart';
 const _margemBarraFlutuante = 20.0;
 
 /// Redução TOTAL de largura da cápsula, em cm, acumulada ao longo de
-/// pedidos sucessivos: 1,9cm (rodada anterior) + 2cm (pedido explícito
-/// mais recente) = 3,9cm. Sempre CENTRALIZADA -- ver `margemLateral` em
-/// `_construirBarraFlutuante`, que soma METADE disto a cada lado (encolhe
-/// a largura total nesse valor exato sem tirar a cápsula do centro).
+/// pedidos sucessivos: 1,9cm + 2cm = 3,9cm. Sempre CENTRALIZADA -- ver
+/// `margemLateral` em `_construirBarraFlutuante`, que soma METADE disto a
+/// cada lado (encolhe a largura total nesse valor exato sem tirar a
+/// cápsula do centro).
 const _reducaoLarguraCm = 1.9 + 2.0;
 
 /// Altura da cápsula -- 58 (valor de uma rodada anterior) + 0,2cm (pedido
-/// explícito mais recente). Agora é a altura de TUDO: o botão de Home
-/// deixou de vazar por cima dela (ver comentário da classe e de
-/// `_botaoHome`), então não sobra nenhum espaço extra reservado no topo.
+/// explícito). Todos os itens (Home incluído -- ele não tem mais destaque
+/// nenhum, ver comentário da classe) vivem dentro dessa altura, sem vazar.
 final _alturaBarraFlutuante = 58.0 + _cmParaPx(0.2);
-
-/// Diâmetro do botão circular de Home -- agora um ITEM DENTRO da linha de
-/// botões (pedido explícito: "mesma altura da linha horizontal"), por isso
-/// precisa caber dentro de `_alturaBarraFlutuante` com folga, em vez de
-/// vazar por cima dela como antes.
-const _diametroBotaoHome = 44.0;
-
-/// Cor do botão de Home -- pedido explícito de design (mockup mostra um
-/// dourado/amarelo, diferente do azul `AppColors.destaque` usado no resto
-/// do app). Constante LOCAL deste arquivo de propósito: não altera o azul
-/// de destaque usado em botões/links do app inteiro, só este botão.
-const _corBotaoHome = Color(0xFFF2B705);
 
 /// cm -> pixels lógicos, mesma conversão usada em `mapa_screen.dart`
 /// (`_cmParaPx`) -- repetida aqui porque aquela é privada ao próprio
@@ -49,8 +36,9 @@ double _cmParaPx(double cm) => cm / 2.54 * 160;
 /// Um item de navegação da barra flutuante -- ícone (normal/selecionado),
 /// rótulo e o ÍNDICE que ele representa dentro de `telas`/`IndexedStack`.
 /// Esse índice é fixo por papel (ver `build`) -- não é a posição em que o
-/// item é desenhado na barra, que varia (metade vai pro lado esquerdo do
-/// botão de Home, a outra metade pro direito -- ver `_construirBarraFlutuante`).
+/// item é desenhado na barra, que varia (metade dos itens vai pro lado
+/// esquerdo do Home, a outra metade pro direito -- ver
+/// `_construirBarraFlutuante`).
 class _ItemNavegacao {
   final IconData icone;
   final IconData iconeSelecionado;
@@ -68,15 +56,16 @@ class _ItemNavegacao {
 /// Casca de navegação da área logada -- uma barra flutuante em formato de
 /// cápsula, suspensa sobre o conteúdo, alternando entre as áreas reais do
 /// app:
-///   Cliente:      Rendimentos · Perfil · HOME (centro) · Solicitações
-///   Profissional: Rendimentos · Perfil · HOME (centro) · Clientes · Solicitações
+///   Cliente:      Rendimentos · Perfil · Início · Solicitações
+///   Profissional: Rendimentos · Perfil · Início · Clientes · Solicitações
 ///
-/// O botão de Home fica sempre no CENTRO GEOMÉTRICO da linha de botões, na
-/// MESMA altura dela (pedido explícito) -- diferente de uma versão anterior
-/// deste arquivo, em que ele ficava fixo na ponta esquerda e vazava por
-/// cima da cápsula. Agora ele é só mais um item DENTRO do `Row` (só que
-/// com largura fixa e aparência distinta), então nunca sobrepõe nem
-/// ultrapassa a altura da cápsula.
+/// O item "Início" (Home) é PADRÃO, igual a todos os outros -- pedido
+/// explícito: sem cor de destaque, sem círculo, sem elevação própria; o
+/// mesmo ícone-em-cima/rótulo-embaixo, a mesma cor de seleção
+/// (`AppColors.destaque` quando ativo) que os demais. Fica no CENTRO
+/// geométrico da linha de botões (metade dos outros itens de cada lado,
+/// ver `metade` em `build`), mas isso é só POSIÇÃO -- visualmente ele não
+/// se distingue em nada dos vizinhos.
 ///
 /// "Clientes" (visão do profissional sobre a própria carteira, ver
 /// `MeusClientesScreen`) é o único item sem equivalente do lado do
@@ -106,7 +95,7 @@ class _HomeShellState extends State<HomeShell> {
     final ehProfissional = papel == Papel.profissional;
 
     final telas = [
-      const MapaScreen(), // Home = 0
+      const MapaScreen(), // Início = 0
       const RendimentosScreen(), // Rendimentos = 1
       ehProfissional ? const EditarPerfilScreen() : const PerfilClienteScreen(), // Perfil = 2
       if (ehProfissional) const MeusClientesScreen(), // Clientes = 3 (só profissional)
@@ -119,13 +108,24 @@ class _HomeShellState extends State<HomeShell> {
     // deixar o IndexedStack apontar para um índice inexistente.
     final indiceSeguro = _indiceAtual < telas.length ? _indiceAtual : 0;
 
-    // Itens ao redor do botão de Home -- distribuídos à esquerda/direita
-    // dele (ver `metade` abaixo) pra ele cair exatamente no CENTRO
-    // geométrico da linha de botões, pedido explícito.
+    // Item de Início (Home) -- PADRÃO, igual a todos os outros (pedido
+    // explícito, ver comentário da classe): mesmo tratamento visual de
+    // `_botaoNavegacao`, só entra separado dos "itensLaterais" pra poder
+    // ficar exatamente no meio deles (ver split logo abaixo).
+    const itemHome = _ItemNavegacao(
+      icone: Icons.home_outlined,
+      iconeSelecionado: Icons.home,
+      rotulo: 'Início',
+      indice: 0,
+    );
+
     final itensLaterais = [
+      // "$" no ícone -- pedido explícito: `monetization_on` é uma moeda
+      // com o símbolo "$" desenhado nela (diferente de `assessment`, que
+      // usado antes, era só um gráfico de barras sem nenhum "$").
       const _ItemNavegacao(
-        icone: Icons.assessment_outlined,
-        iconeSelecionado: Icons.assessment,
+        icone: Icons.monetization_on_outlined,
+        iconeSelecionado: Icons.monetization_on,
         rotulo: 'Rendimentos',
         indice: 1,
       ),
@@ -150,10 +150,9 @@ class _HomeShellState extends State<HomeShell> {
       ),
     ];
 
-    // Divide os itens laterais entre esquerda e direita do botão de Home --
-    // com um número ÍMPAR deles (caso do profissional: Rendimentos, Perfil,
-    // Clientes, Solicitações -- 4, na verdade par; só o caso do cliente, com
-    // 3, é ímpar), o lado esquerdo fica com um a mais quando sobra resto.
+    // Divide os itens laterais entre esquerda e direita do Início -- com
+    // um número ÍMPAR deles (caso do cliente: Rendimentos, Perfil,
+    // Solicitações -- 3), o lado esquerdo fica com um a mais.
     final metade = (itensLaterais.length / 2).ceil();
     final itensEsquerda = itensLaterais.sublist(0, metade);
     final itensDireita = itensLaterais.sublist(metade);
@@ -186,6 +185,7 @@ class _HomeShellState extends State<HomeShell> {
           _construirBarraFlutuante(
             context,
             indiceAtual: indiceSeguro,
+            itemHome: itemHome,
             itensEsquerda: itensEsquerda,
             itensDireita: itensDireita,
           ),
@@ -195,9 +195,10 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   /// Barra de navegação flutuante -- um contêiner em formato de cápsula
-  /// "suspensa" sobre o conteúdo, com o botão de Home no CENTRO da linha
-  /// de botões, na mesma altura dela (pedido explícito -- ver comentário
-  /// da classe).
+  /// "suspensa" sobre o conteúdo. Todos os itens (Início incluído) usam o
+  /// MESMO widget (`_botaoNavegacao`) e o MESMO tratamento de layout
+  /// (`Expanded`, distribuição igual de espaço) -- nenhum se destaca dos
+  /// outros.
   ///
   /// Largura reduzida em 3,9cm no total e mantida centralizada: soma
   /// METADE dessa redução à margem de CADA lado -- é o que encolhe a
@@ -207,6 +208,7 @@ class _HomeShellState extends State<HomeShell> {
   Widget _construirBarraFlutuante(
     BuildContext context, {
     required int indiceAtual,
+    required _ItemNavegacao itemHome,
     required List<_ItemNavegacao> itensEsquerda,
     required List<_ItemNavegacao> itensDireita,
   }) {
@@ -219,9 +221,6 @@ class _HomeShellState extends State<HomeShell> {
       // sem isso, em aparelhos com navegação por gestos a barra ficaria
       // colada (ou parcialmente escondida) atrás dela.
       bottom: _margemBarraFlutuante + MediaQuery.of(context).padding.bottom,
-      // Sem SizedBox/Stack extra pra "vazar" pra cima -- o Home agora mora
-      // DENTRO da linha de botões, então a cápsula já é a altura inteira
-      // do componente.
       child: Container(
         height: _alturaBarraFlutuante,
         clipBehavior: Clip.antiAlias,
@@ -246,15 +245,7 @@ class _HomeShellState extends State<HomeShell> {
             children: [
               for (final item in itensEsquerda)
                 Expanded(child: _botaoNavegacao(item, indiceAtual)),
-              // Botão de Home -- largura FIXA (não Expanded), pra
-              // continuar compacto e sempre cair exatamente no centro
-              // geométrico entre os itens laterais (metade de cada lado
-              // deles, ver `metade` em `build`), na MESMA altura da linha
-              // (Row centraliza verticalmente por padrão).
-              SizedBox(
-                width: _diametroBotaoHome + 16,
-                child: Center(child: _botaoHome()),
-              ),
+              Expanded(child: _botaoNavegacao(itemHome, indiceAtual)),
               for (final item in itensDireita)
                 Expanded(child: _botaoNavegacao(item, indiceAtual)),
             ],
@@ -264,8 +255,9 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  /// Um item lateral (ícone + rótulo) da cápsula -- toda a área (ícone e
-  /// texto) reage ao toque, não só o ícone.
+  /// Um item da cápsula -- ícone em cima, rótulo embaixo, toda a área
+  /// reage ao toque (não só o ícone). MESMO widget para todos os itens,
+  /// Início incluído -- pedido explícito de não destacar nenhum deles.
   Widget _botaoNavegacao(_ItemNavegacao item, int indiceAtual) {
     final selecionado = indiceAtual == item.indice;
     final cor = selecionado ? AppColors.destaque : AppColors.textoSecundario;
@@ -288,38 +280,6 @@ class _HomeShellState extends State<HomeShell> {
             overflow: TextOverflow.ellipsis,
           ),
         ],
-      ),
-    );
-  }
-
-  /// O botão de destaque (Home) -- agora um ITEM DENTRO da linha de
-  /// botões, centralizado nela e na mesma altura (pedido explícito),
-  /// diferente de uma versão anterior deste arquivo, em que ele vazava
-  /// por cima da cápsula. `Material` + `CircleBorder` seguem dando o
-  /// formato redondo e o toque (`InkWell`) certinho na área circular.
-  Widget _botaoHome() {
-    const indiceHome = 0;
-
-    return Material(
-      color: _corBotaoHome,
-      shape: const CircleBorder(side: BorderSide(color: AppColors.superficie, width: 3)),
-      elevation: 2,
-      shadowColor: _corBotaoHome.withValues(alpha: 0.5),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () => setState(() => _indiceAtual = indiceHome),
-        child: SizedBox(
-          width: _diametroBotaoHome,
-          height: _diametroBotaoHome,
-          child: const Icon(
-            // Ícone de casa em contorno escuro sobre o círculo dourado --
-            // pedido de design anterior (mockup mostrava o ícone em tom
-            // escuro, não branco).
-            Icons.home_outlined,
-            color: AppColors.textoPrimario,
-            size: 22,
-          ),
-        ),
       ),
     );
   }
