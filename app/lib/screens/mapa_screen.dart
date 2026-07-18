@@ -961,15 +961,19 @@ class _MapaScreenState extends State<MapaScreen> {
     // vez: agora a área tocável cobre o cartão do mapa inteiro.
     const alturaTotalComCartao = topoDoCartao + alturaCartaoMapa;
 
-    // Versão mais escura da cor de destaque, só para o cabeçalho -- pedido
-    // explícito de novo ("escurecer o azul do topo"; a primeira tentativa,
-    // 30% de preto, não foi escura o bastante). `AppColors.destaque` em si
-    // NÃO muda (ela é usada em botões/chips/ícones em todo o resto do
-    // app); em vez de escurecer a paleta inteira, misturamos 45% de preto
-    // só aqui, com `Color.lerp` -- mantém a MESMA cor-base (nada de um tom
-    // novo inventado, como um azul genérico do Material) só que bem mais
-    // profunda, quase um "petróleo".
-    final corCabecalho = Color.lerp(AppColors.destaque, Colors.black, 0.45)!;
+    // Pedido explícito mais recente: trocar o "azul escuro" do cabeçalho
+    // (a versão escurecida de AppColors.destaque que existia aqui antes,
+    // via Color.lerp com preto) por "um conjunto de cor viva igual as
+    // cores do Google" -- as quatro cores clássicas da marca Google
+    // (azul/vermelho/amarelo/verde), num degradê diagonal. `AppColors.
+    // destaque` em si continua intocado (usada em botões/chips/ícones em
+    // todo o resto do app); esta paleta é local só deste cabeçalho.
+    const coresCabecalho = [
+      Color(0xFF4285F4), // azul
+      Color(0xFFEA4335), // vermelho
+      Color(0xFFFBBC05), // amarelo
+      Color(0xFF34A853), // verde
+    ];
 
     return SizedBox(
       height: alturaTotalComCartao,
@@ -979,13 +983,13 @@ class _MapaScreenState extends State<MapaScreen> {
           Container(
             height: alturaCabecalho,
             width: double.infinity,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [corCabecalho, corCabecalho.withValues(alpha: 0.85)],
+                colors: coresCabecalho,
               ),
-              borderRadius: const BorderRadius.only(
+              borderRadius: BorderRadius.only(
                 bottomLeft: Radius.circular(32),
                 bottomRight: Radius.circular(32),
               ),
