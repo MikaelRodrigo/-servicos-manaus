@@ -33,6 +33,10 @@ final _alturaBarraFlutuante = 58.0 + _cmParaPx(0.2);
 /// um utilitário compartilhado.
 double _cmParaPx(double cm) => cm / 2.54 * 160;
 
+/// Tamanho dos ícones do menu -- pedido explícito: 30% maiores que o
+/// tamanho original (24).
+const _tamanhoIconeMenu = 24.0 * 1.3;
+
 /// Um item de navegação da barra flutuante -- ícone (normal/selecionado),
 /// rótulo e o ÍNDICE que ele representa dentro de `telas`/`IndexedStack`.
 /// Esse índice é fixo por papel (ver `build`) -- não é a posição em que o
@@ -267,7 +271,7 @@ class _HomeShellState extends State<HomeShell> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(selecionado ? item.iconeSelecionado : item.icone, color: cor, size: 24),
+          Icon(selecionado ? item.iconeSelecionado : item.icone, color: cor, size: _tamanhoIconeMenu),
           const SizedBox(height: 2),
           Text(
             item.rotulo,
