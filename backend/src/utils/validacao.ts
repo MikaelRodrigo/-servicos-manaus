@@ -329,30 +329,36 @@ export function notaObrigatoria(valor: unknown, campo: string): number {
 }
 
 /* ============================================================================
-   VALIDADORES DO MÓDULO DE PAGAMENTOS (migração 14 --
-   14_pagamentos_escrow_split.sql)
+   VALIDADORES DO MÓDULO DE PAGAMENTOS (migração 15 --
+   15_remocao_pagarme_modelo_intermediacao.sql)
 
    Cada `*_VALIDOS`/`type Status*` abaixo espelha, 1:1, um ENUM do banco.
    Mesma regra de sempre: o Postgres não expõe o próprio schema para o
    TypeScript, então um enum novo no SQL PRECISA ser copiado aqui também --
    nada aqui é derivado automaticamente.
+
+   Substituem por completo os validadores do modelo antigo (gateway/escrow/
+   split via Pagar.me, migração 14) -- o novo fluxo é proposta de valor pelo
+   profissional -> confirmação do cliente -> cobrança Pix/Boleto gerada na
+   conta do PRÓPRIO profissional -> retenção -> liberação. Ver o comentário
+   completo no topo de `database/15_*.sql`.
    ========================================================================= */
 
 export const STATUS_TRANSACAO_VALIDOS = [
-  'PENDENTE',
-  'AUTORIZADA',
-  'FALHOU',
-  'EM_DISPUTA',
+  'AGUARDANDO_CONFIRMACAO_CLIENTE',
+  'RECUSADA',
+  'AGUARDANDO_PAGAMENTO',
+  'RETIDA',
   'LIBERADA',
-  'REEMBOLSADA',
+  'CANCELADA',
 ] as const;
 export type StatusTransacao = (typeof STATUS_TRANSACAO_VALIDOS)[number];
 
-export const METODO_PAGAMENTO_VALIDOS = ['PIX', 'CARTAO'] as const;
+export const METODO_PAGAMENTO_VALIDOS = ['PIX', 'BOLETO', 'OUTRO'] as const;
 export type MetodoPagamento = (typeof METODO_PAGAMENTO_VALIDOS)[number];
 
-export const STATUS_ESCROW_VALIDOS = ['RETIDO', 'LIBERADO', 'REEMBOLSADO'] as const;
-export type StatusEscrow = (typeof STATUS_ESCROW_VALIDOS)[number];
+export const STATUS_REPASSE_VALIDOS = ['PENDENTE', 'CONCLUIDO'] as const;
+export type StatusRepasse = (typeof STATUS_REPASSE_VALIDOS)[number];
 
 export const STATUS_DISPUTA_VALIDOS = [
   'ABERTA',
@@ -365,28 +371,12 @@ export type StatusDisputa = (typeof STATUS_DISPUTA_VALIDOS)[number];
 export const STATUS_NOTA_FISCAL_VALIDOS = ['PENDENTE', 'EMITIDA', 'ERRO'] as const;
 export type StatusNotaFiscal = (typeof STATUS_NOTA_FISCAL_VALIDOS)[number];
 
-/** enum literal 'PIX' | 'CARTAO' vindo de BODY -- qualquer outra coisa é 400. */
+/** enum literal 'PIX' | 'BOLETO' | 'OUTRO' vindo de BODY -- qualquer outra coisa é 400. */
 export function metodoPagamentoObrigatorio(valor: unknown, campo = 'metodo_pagamento'): MetodoPagamento {
-  if (valor !== 'PIX' && valor !== 'CARTAO') {
-    throw new ErroDeValidacao(`O campo "${campo}" deve ser "PIX" ou "CARTAO". Recebido: ${valor}.`);
+  if (valor !== 'PIX' && valor !== 'BOLETO' && valor !== 'OUTRO') {
+    throw new ErroDeValidacao(`O campo "${campo}" deve ser "PIX", "BOLETO" ou "OUTRO". Recebido: ${valor}.`);
   }
   return valor;
-}
-
-/**
- * Parcelas -- só faz sentido para CARTAO (ver `chk_transacao_parcelas_coerentes`
- * na migração 14: PIX é sempre 1x). Aceita ausência (padrão 1), mas nunca
- * aceita um valor fora de 1-12 -- 12x é o teto comum de qualquer adquirente
- * brasileira; um valor maior quase certo é erro de input, não uma parcela
- * real que o gateway aceitaria.
- */
-export function parcelasOpcional(valor: unknown, campo = 'parcelas'): number {
-  if (valor === undefined || valor === null) return 1;
-  const n = numeroDoBody(valor, campo);
-  if (!Number.isInteger(n) || n < 1 || n > 12) {
-    throw new ErroDeValidacao(`O campo "${campo}" deve ser um número inteiro de 1 a 12.`);
-  }
-  return n;
 }
 
 /**

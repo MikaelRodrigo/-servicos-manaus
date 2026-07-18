@@ -27,6 +27,7 @@ import {
   cancelarServicoComoProfissional,
 } from '../repositories/servicos.repository';
 import { profissionalPossuiTag } from '../repositories/profissionais.repository';
+import { cancelarTransacoesAbertasDoServico } from '../repositories/transacoes.repository';
 import { avaliacoesRouter } from './avaliacoes.routes';
 
 export const servicosRouter = Router();
@@ -314,6 +315,13 @@ servicosRouter.patch('/:id/cancelar', async (req: Request, res: Response, next: 
     if (!conseguiu) {
       throw new ErroDeConflito('O status do serviço mudou. Recarregue e tente novamente.');
     }
+
+    // Cancela junto qualquer proposta/cobrança ainda EM ABERTO (migração
+    // 15) -- limitado, de propósito, a transações que ainda não chegaram a
+    // "RETIDA" (dinheiro já na conta do profissional exige estorno manual,
+    // não é uma operação de banco de dados). Ver o comentário completo em
+    // `cancelarTransacoesAbertasDoServico`.
+    await cancelarTransacoesAbertasDoServico(id);
 
     return res.json(await buscarServicoPorId(id));
   } catch (erro) {

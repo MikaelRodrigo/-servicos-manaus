@@ -248,6 +248,31 @@ export function concluirServico(idServico: string, profissionalId: string): Prom
   );
 }
 
+/**
+ * EM_ANDAMENTO -> CONCLUIDO, disparada pelo CLIENTE via "Confirmar término
+ * do serviço" (`routes/pagamentos.routes.ts`, migração 15 -- modelo de
+ * intermediação) -- não pelo profissional, diferente de `concluirServico`
+ * acima (que continua existindo para o fluxo antigo/manual, mas o novo
+ * fluxo de pagamento usa ESTA função). Sem checagem de "dono" por coluna
+ * (`colunaDono`): a rota que chama isto já verificou, antes, que
+ * `req.usuario.sub === servico.cliente_id` E que existe uma transação
+ * `RETIDA` para este serviço -- checagens de ownership e de regra de
+ * negócio que pertencem à ROTA (`pagamentos.routes.ts`), não a este
+ * repository. Aqui só resta a transição de estado, atômica e condicional
+ * como todas as outras desta máquina de estados.
+ */
+export async function marcarServicoConcluidoPeloPagamento(idServico: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE servicos
+        SET status = 'CONCLUIDO'::status_servico_enum,
+            data_conclusao = NOW()
+      WHERE id_servico = $1
+        AND status = 'EM_ANDAMENTO'::status_servico_enum`,
+    [idServico],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 const STATUS_CANCELAVEIS: StatusServico[] = ['SOLICITADO', 'ACEITO', 'EM_ANDAMENTO'];
 
 export function cancelarServicoComoCliente(idServico: string, clienteId: string): Promise<boolean> {

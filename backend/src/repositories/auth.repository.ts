@@ -62,6 +62,29 @@ export async function buscarProfissionalPorEmail(
   return rows[0] ?? null;
 }
 
+/**
+ * Admin (migração 15 -- tabela `admins`, criada só para gerenciar a
+ * conciliação de comissão do modelo de intermediação). Sem função
+ * `criarAdmin*` correspondente de propósito: a PRIMEIRA conta (e qualquer
+ * conta futura) é criada por INSERT manual direto no banco -- ver o
+ * comentário de exemplo no final de `database/15_*.sql`. Nunca existe uma
+ * rota pública `POST /auth/cadastro/admin`. `admins` não tem
+ * `url_foto_perfil` (não precisa de foto de perfil), por isso sempre `null`
+ * aqui -- mantém o formato `UsuarioAutenticavel` idêntico ao de
+ * cliente/profissional, para `POST /auth/login` reaproveitar exatamente a
+ * mesma lógica de verificação de senha e geração de token.
+ */
+export async function buscarAdminPorEmail(email: string): Promise<UsuarioAutenticavel | null> {
+  const { rows } = await pool.query<{ id: string; email: string; senha_hash: string; nome_exibicao: string }>(
+    `SELECT admin_id AS id, email, senha_hash, nome AS nome_exibicao
+       FROM admins
+      WHERE email = $1`,
+    [email],
+  );
+  if (!rows[0]) return null;
+  return { ...rows[0], url_foto_perfil: null };
+}
+
 // ---------------------------------------------------------------------------
 // CADASTRO: clientes
 // ---------------------------------------------------------------------------

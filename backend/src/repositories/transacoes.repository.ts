@@ -1,20 +1,18 @@
 import { pool } from '../database';
-import { MetodoPagamento, StatusTransacao } from '../utils/validacao';
+import { MetodoPagamento, StatusTransacao, StatusRepasse } from '../utils/validacao';
 
 /* ============================================================================
    O QUE ESTE ARQUIVO FAZ
 
-   Máquina de estados de `transacoes` (Etapas A/C/D do fluxo de pagamento) +
-   `retencoes_escrow` (1:1 com toda transação AUTORIZADA) + o log de
-   idempotência de webhook (`eventos_webhook_pagamento`) -- os três vivem
-   juntos aqui porque toda transição de `transacoes.status` mexe também
-   numa das outras duas tabelas na MESMA operação lógica (autorizar cria a
-   retenção; liberar fecha a retenção; todo evento de webhook processado
-   está sempre ligado a uma transação).
+   Máquina de estados de `transacoes` no modelo de intermediação (migração
+   15 -- substitui por completo o modelo de Escrow/Split via Pagar.me da
+   migração 14):
 
-     PENDENTE --(gateway autoriza)--> AUTORIZADA --(cliente confirma)--> LIBERADA
-     PENDENTE --(gateway recusa)--> FALHOU
-     AUTORIZADA --(REPORT_ISSUE)--> EM_DISPUTA --(mediação)--> LIBERADA | REEMBOLSADA
+     AGUARDANDO_CONFIRMACAO_CLIENTE --(cliente recusa)--> RECUSADA
+     AGUARDANDO_CONFIRMACAO_CLIENTE --(cliente confirma)--> AGUARDANDO_PAGAMENTO
+     AGUARDANDO_PAGAMENTO --(API Pix própria confirma o pagamento)--> RETIDA
+     RETIDA --(cliente confirma término do serviço)--> LIBERADA
+     AGUARDANDO_CONFIRMACAO_CLIENTE | AGUARDANDO_PAGAMENTO --(serviço cancelado)--> CANCELADA
 
    Mesmo padrão de `atualizarStatusCondicional` de `servicos.repository.ts`:
    todo UPDATE de status é condicional (`WHERE status = 'ESPERADO'`) e
@@ -23,25 +21,36 @@ import { MetodoPagamento, StatusTransacao } from '../utils/validacao';
 
    VALORES MONETÁRIOS: toda coluna NUMERIC é lida com `::text` explícito
    (nunca cai no parser float global de `database.ts`) e escrita como
-   string -- ver o comentário completo em `utils/dinheiro.ts`.
+   string -- ver o comentário completo em `utils/dinheiro.ts`. `taxa_comissao`
+   e `valor_repasse` são GENERATED pelo banco (ver migração 15) -- nunca
+   aparecem do lado esquerdo de um INSERT/UPDATE aqui.
    ========================================================================= */
 
 export interface Transacao {
   id_transacao: string;
   id_servico: string;
   status: StatusTransacao;
-  metodo_pagamento: MetodoPagamento;
-  parcelas: number;
-  valor_servico: string;
-  taxa_parcelamento: string;
-  valor_total_cobrado: string;
-  taxa_plataforma: string;
-  valor_repasse_profissional: string | null;
-  id_pedido_gateway: string | null;
-  id_cobranca_gateway: string | null;
-  id_transacao_gateway: string | null;
-  autorizada_em: string | null;
-  liberada_em: string | null;
+
+  valor_total: string;
+  taxa_comissao_percentual: string;
+  taxa_comissao: string;
+  valor_repasse: string;
+
+  proposto_em: string;
+  respondido_em: string | null;
+
+  metodo_pagamento: MetodoPagamento | null;
+  chave_cobranca: string | null;
+  id_cobranca_externa: string | null;
+
+  pago_em: string | null;
+  liberado_em: string | null;
+
+  status_repasse: StatusRepasse;
+  repasse_confirmado_em: string | null;
+  repasse_confirmado_por_admin_id: string | null;
+  referencia_repasse: string | null;
+
   created_at: string;
   updated_at: string;
 }
@@ -51,18 +60,21 @@ const SELECT_TRANSACAO = `
     id_transacao,
     id_servico,
     status,
+    valor_total::text,
+    taxa_comissao_percentual::text,
+    taxa_comissao::text,
+    valor_repasse::text,
+    proposto_em,
+    respondido_em,
     metodo_pagamento,
-    parcelas,
-    valor_servico::text,
-    taxa_parcelamento::text,
-    valor_total_cobrado::text,
-    taxa_plataforma::text,
-    valor_repasse_profissional::text,
-    id_pedido_gateway,
-    id_cobranca_gateway,
-    id_transacao_gateway,
-    autorizada_em,
-    liberada_em,
+    chave_cobranca,
+    id_cobranca_externa,
+    pago_em,
+    liberado_em,
+    status_repasse,
+    repasse_confirmado_em,
+    repasse_confirmado_por_admin_id,
+    referencia_repasse,
     created_at,
     updated_at
   FROM transacoes
@@ -75,7 +87,18 @@ export async function buscarTransacaoPorId(idTransacao: string): Promise<Transac
   return rows[0] ?? null;
 }
 
-/** Todas as tentativas de pagamento de um serviço, mais recente primeiro. */
+/** Usado pelo handler de webhook para achar a transação a partir do id de cobrança da API Pix própria. */
+export async function buscarTransacaoPorIdCobrancaExterna(
+  idCobrancaExterna: string,
+): Promise<Transacao | null> {
+  const { rows } = await pool.query<Transacao>(
+    `${SELECT_TRANSACAO} WHERE id_cobranca_externa = $1`,
+    [idCobrancaExterna],
+  );
+  return rows[0] ?? null;
+}
+
+/** Todas as tentativas de proposta/pagamento de um serviço, mais recente primeiro. */
 export async function listarTransacoesDoServico(idServico: string): Promise<Transacao[]> {
   const { rows } = await pool.query<Transacao>(
     `${SELECT_TRANSACAO} WHERE id_servico = $1 ORDER BY created_at DESC`,
@@ -84,270 +107,235 @@ export async function listarTransacoesDoServico(idServico: string): Promise<Tran
   return rows;
 }
 
-/** Usado pelo handler de webhook para achar a transação a partir do `code`/`order.id` do Pagar.me. */
-export async function buscarTransacaoPorIdPedidoGateway(
-  idPedidoGateway: string,
-): Promise<Transacao | null> {
-  const { rows } = await pool.query<Transacao>(
-    `${SELECT_TRANSACAO} WHERE id_pedido_gateway = $1`,
-    [idPedidoGateway],
-  );
-  return rows[0] ?? null;
-}
-
 /**
- * Uma transação "em aberto" (PENDENTE ou AUTORIZADA) para o mesmo serviço
- * -- usada para recusar uma SEGUNDA tentativa de pagamento enquanto a
- * primeira ainda não falhou/foi liberada. Sem essa checagem, um duplo
- * clique no botão "pagar" criaria duas cobranças para o mesmo serviço.
+ * Uma transação "em aberto" (ainda não recusada/cancelada, e ainda não
+ * liberada) para o mesmo serviço -- usada para recusar uma SEGUNDA proposta
+ * de valor enquanto a primeira ainda está em curso. Sem essa checagem, o
+ * profissional poderia propor dois valores diferentes ao mesmo tempo para o
+ * mesmo serviço.
  */
 export async function existeTransacaoEmAbertoParaServico(idServico: string): Promise<boolean> {
   const { rows } = await pool.query(
     `SELECT 1 FROM transacoes
       WHERE id_servico = $1
-        AND status = ANY(ARRAY['PENDENTE','AUTORIZADA','EM_DISPUTA']::status_transacao_enum[])
+        AND status = ANY(ARRAY['AGUARDANDO_CONFIRMACAO_CLIENTE','AGUARDANDO_PAGAMENTO','RETIDA']::status_transacao_enum[])
       LIMIT 1`,
     [idServico],
   );
   return rows.length > 0;
 }
 
-/**
- * `true` se existir alguma transação AUTORIZADA (ou já LIBERADA -- o
- * profissional obviamente pode iniciar se o pagamento já foi liberado
- * também, embora esse caminho não devesse acontecer na ordem normal do
- * fluxo) para este serviço. É a checagem que `exigirPagamentoAutorizado`
- * (rotas de pagamento) usaria para liberar a Etapa B ("Iniciar") -- ver o
- * comentário sobre por que esse middleware existe mas NÃO está wireado em
- * `servicos.routes.ts` ainda.
- */
-export async function existeTransacaoAutorizada(idServico: string): Promise<boolean> {
-  const { rows } = await pool.query(
-    `SELECT 1 FROM transacoes
-      WHERE id_servico = $1
-        AND status = ANY(ARRAY['AUTORIZADA','LIBERADA']::status_transacao_enum[])
-      LIMIT 1`,
-    [idServico],
-  );
-  return rows.length > 0;
-}
-
-export interface DadosNovaTransacao {
+export interface DadosNovaProposta {
   idServico: string;
-  metodoPagamento: MetodoPagamento;
-  parcelas: number;
-  /** String decimal, ex. "49.90" -- ver utils/dinheiro.ts. */
-  valorServico: string;
-  /** String decimal, DEFAULT "0" -- taxa de antecipação/parcelamento (Etapa A). */
-  taxaParcelamento: string;
-  /** String decimal, DEFAULT "0" -- taxa da plataforma. */
-  taxaPlataforma: string;
+  /** String decimal, ex. "150.00" -- o valor que o profissional avaliou presencialmente. */
+  valorTotal: string;
+  /** String decimal, ex. "8.9" -- o percentual VIGENTE no momento desta proposta (ver env.comissaoPlataformaPercentual). */
+  taxaComissaoPercentual: string;
 }
 
-/** Cria a transação em PENDENTE (Etapa A, antes de chamar o gateway). */
-export async function criarTransacaoPendente(dados: DadosNovaTransacao): Promise<Transacao> {
+/** Cria a proposta de valor (o profissional avalia o serviço e insere o preço). */
+export async function criarPropostaTransacao(dados: DadosNovaProposta): Promise<Transacao> {
   const { rows } = await pool.query<{ id_transacao: string }>(
-    `INSERT INTO transacoes
-       (id_servico, metodo_pagamento, parcelas, valor_servico, taxa_parcelamento, taxa_plataforma)
-     VALUES ($1, $2::metodo_pagamento_enum, $3, $4::numeric, $5::numeric, $6::numeric)
+    `INSERT INTO transacoes (id_servico, valor_total, taxa_comissao_percentual)
+     VALUES ($1, $2::numeric, $3::numeric)
      RETURNING id_transacao`,
-    [
-      dados.idServico,
-      dados.metodoPagamento,
-      dados.parcelas,
-      dados.valorServico,
-      dados.taxaParcelamento,
-      dados.taxaPlataforma,
-    ],
+    [dados.idServico, dados.valorTotal, dados.taxaComissaoPercentual],
   );
 
   const transacao = await buscarTransacaoPorId(rows[0].id_transacao);
   return transacao as Transacao; // acabamos de inserir, não pode ser null
 }
 
-/** Grava os IDs do gateway assim que a chamada de autorização volta (mesmo antes de saber se foi aceita ou recusada) -- útil para o webhook conseguir casar o evento mesmo que ele chegue ANTES da nossa própria resposta HTTP terminar de processar. */
-export async function gravarIdsDoGateway(
-  idTransacao: string,
-  ids: { idPedidoGateway: string; idCobrancaGateway: string; idTransacaoGateway: string | null },
-): Promise<void> {
-  await pool.query(
-    `UPDATE transacoes
-        SET id_pedido_gateway = $2, id_cobranca_gateway = $3, id_transacao_gateway = $4
-      WHERE id_transacao = $1`,
-    [idTransacao, ids.idPedidoGateway, ids.idCobrancaGateway, ids.idTransacaoGateway],
-  );
-}
-
-/**
- * PENDENTE -> AUTORIZADA + cria a retenção no Escrow, na MESMA transação
- * de banco (`BEGIN`/`COMMIT` explícitos -- diferente do resto do projeto,
- * que usa só `pool.query` avulso, porque aqui DUAS tabelas precisam mudar
- * atomicamente: se a retenção falhasse ao inserir depois do UPDATE de
- * status já ter commitado, a transação ficaria "AUTORIZADA" sem nenhum
- * registro de quanto está retido -- um estado inconsistente que nenhuma
- * query de leitura detectaria sozinha).
- */
-export async function marcarAutorizada(idTransacao: string): Promise<boolean> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const { rows, rowCount } = await client.query<{ valor_total_cobrado: string }>(
-      `UPDATE transacoes
-          SET status = 'AUTORIZADA'::status_transacao_enum,
-              autorizada_em = NOW()
-        WHERE id_transacao = $1
-          AND status = 'PENDENTE'::status_transacao_enum
-        RETURNING valor_total_cobrado::text`,
-      [idTransacao],
-    );
-
-    if ((rowCount ?? 0) === 0) {
-      await client.query('ROLLBACK');
-      return false;
-    }
-
-    await client.query(
-      `INSERT INTO retencoes_escrow (id_transacao, valor_retido)
-       VALUES ($1, $2::numeric)`,
-      [idTransacao, rows[0].valor_total_cobrado],
-    );
-
-    await client.query('COMMIT');
-    return true;
-  } catch (erro) {
-    await client.query('ROLLBACK');
-    throw erro;
-  } finally {
-    client.release();
-  }
-}
-
-export function marcarFalhou(idTransacao: string): Promise<boolean> {
-  return atualizarStatusSimples(idTransacao, 'PENDENTE', 'FALHOU');
-}
-
-export function marcarEmDisputa(idTransacao: string): Promise<boolean> {
-  return atualizarStatusSimples(idTransacao, 'AUTORIZADA', 'EM_DISPUTA');
-}
-
-/**
- * AUTORIZADA (ou EM_DISPUTA, quando uma mediação resolve a favor do
- * profissional) -> LIBERADA, grava o valor de repasse e fecha a retenção
- * do Escrow -- de novo, tudo numa transação de banco só.
- *
- * O valor de repasse é SEMPRE `valor_servico - taxa_plataforma`, calculado
- * em SQL (aritmética NUMERIC exata, nunca em JS -- ver utils/dinheiro.ts
- * sobre por que). Uma versão anterior desta função aceitava um valor
- * "override" para o caso de uma disputa com desconto por dano -- removido
- * de propósito junto com o resto dessa funcionalidade (ver o comentário no
- * topo de disputas.repository.ts).
- */
-export async function marcarLiberada(
-  idTransacao: string,
-  statusEsperado: 'AUTORIZADA' | 'EM_DISPUTA',
-): Promise<boolean> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const { rowCount } = await client.query(
-      `UPDATE transacoes
-          SET status = 'LIBERADA'::status_transacao_enum,
-              liberada_em = NOW(),
-              valor_repasse_profissional = valor_servico - taxa_plataforma
-        WHERE id_transacao = $1
-          AND status = $2::status_transacao_enum
-        RETURNING id_transacao`,
-      [idTransacao, statusEsperado],
-    );
-
-    if ((rowCount ?? 0) === 0) {
-      await client.query('ROLLBACK');
-      return false;
-    }
-
-    await client.query(
-      `UPDATE retencoes_escrow
-          SET status = 'LIBERADO'::status_escrow_enum,
-              liberado_em = NOW()
-        WHERE id_transacao = $1
-          AND status = 'RETIDO'::status_escrow_enum`,
-      [idTransacao],
-    );
-
-    await client.query('COMMIT');
-    return true;
-  } catch (erro) {
-    await client.query('ROLLBACK');
-    throw erro;
-  } finally {
-    client.release();
-  }
-}
-
-async function atualizarStatusSimples(
-  idTransacao: string,
-  statusEsperado: StatusTransacao,
-  novoStatus: StatusTransacao,
-): Promise<boolean> {
+/** O cliente recusa o valor proposto -- fim de linha para esta tentativa; o profissional pode propor outra. */
+export async function recusarProposta(idTransacao: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     `UPDATE transacoes
-        SET status = $1::status_transacao_enum
-      WHERE id_transacao = $2
-        AND status = $3::status_transacao_enum`,
-    [novoStatus, idTransacao, statusEsperado],
+        SET status = 'RECUSADA'::status_transacao_enum,
+            respondido_em = NOW()
+      WHERE id_transacao = $1
+        AND status = 'AGUARDANDO_CONFIRMACAO_CLIENTE'::status_transacao_enum`,
+    [idTransacao],
   );
   return (rowCount ?? 0) > 0;
 }
 
-/* ============================================================================
-   EVENTOS DE WEBHOOK -- idempotência
+export interface DadosConfirmacao {
+  metodoPagamento: MetodoPagamento;
+  chaveCobranca: string;
+  idCobrancaExterna: string;
+}
 
-   `criarEventoWebhook` devolve `null` (em vez de lançar) quando o INSERT
-   bate no UNIQUE de `id_evento_externo` -- é o sinal de "este evento já
-   foi recebido antes" que o handler da rota usa para responder 200 sem
-   reprocessar nada.
+/**
+ * O cliente confirma o valor proposto -- gera a cobrança (Pix/Boleto) na
+ * conta do profissional. AGUARDANDO_CONFIRMACAO_CLIENTE -> AGUARDANDO_PAGAMENTO.
+ * A rota chama isto DEPOIS de já ter chamado `services/pix-proprio.ts`
+ * (`gerarCobranca`) -- este repository só grava o resultado, nunca fala com
+ * a API externa.
+ */
+export async function confirmarProposta(
+  idTransacao: string,
+  dados: DadosConfirmacao,
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE transacoes
+        SET status = 'AGUARDANDO_PAGAMENTO'::status_transacao_enum,
+            respondido_em = NOW(),
+            metodo_pagamento = $2::metodo_pagamento_enum,
+            chave_cobranca = $3,
+            id_cobranca_externa = $4
+      WHERE id_transacao = $1
+        AND status = 'AGUARDANDO_CONFIRMACAO_CLIENTE'::status_transacao_enum`,
+    [idTransacao, dados.metodoPagamento, dados.chaveCobranca, dados.idCobrancaExterna],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * A API Pix própria confirma que o pagamento chegou (retido na fonte, na
+ * conta do profissional). AGUARDANDO_PAGAMENTO -> RETIDA. Chamada pelo
+ * webhook (`POST /pagamentos/webhook`) ou, em modo simulado/desenvolvimento,
+ * pela rota `POST /pagamentos/:id/simular-pagamento-recebido`.
+ */
+export async function marcarPagamentoRetido(idTransacao: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE transacoes
+        SET status = 'RETIDA'::status_transacao_enum,
+            pago_em = NOW()
+      WHERE id_transacao = $1
+        AND status = 'AGUARDANDO_PAGAMENTO'::status_transacao_enum`,
+    [idTransacao],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+export function marcarPagamentoRetidoPorCobrancaExterna(
+  idCobrancaExterna: string,
+): Promise<boolean> {
+  return pool
+    .query(
+      `UPDATE transacoes
+          SET status = 'RETIDA'::status_transacao_enum,
+              pago_em = NOW()
+        WHERE id_cobranca_externa = $1
+          AND status = 'AGUARDANDO_PAGAMENTO'::status_transacao_enum`,
+      [idCobrancaExterna],
+    )
+    .then(({ rowCount }) => (rowCount ?? 0) > 0);
+}
+
+/**
+ * O cliente confirma o término do serviço -- libera a retenção. Na prática
+ * o dinheiro já está na conta do profissional desde `RETIDA` (ele nunca
+ * "sai" da conta dele nesse modelo); liberar só significa que ele deixa de
+ * estar congelado, e a comissão (8,9%) passa a ser devida à plataforma.
+ * RETIDA -> LIBERADA.
+ */
+export async function marcarLiberada(idTransacao: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE transacoes
+        SET status = 'LIBERADA'::status_transacao_enum,
+            liberado_em = NOW()
+      WHERE id_transacao = $1
+        AND status = 'RETIDA'::status_transacao_enum`,
+    [idTransacao],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Cancela toda transação AINDA NÃO PAGA de um serviço (chamada quando o
+ * serviço em si é cancelado). Limitada a AGUARDANDO_CONFIRMACAO_CLIENTE e
+ * AGUARDANDO_PAGAMENTO DE PROPÓSITO -- uma transação já `RETIDA` significa
+ * que o dinheiro já chegou na conta do profissional; cancelar isso não é
+ * uma operação de banco de dados, é um estorno de verdade que precisa de
+ * intervenção manual/admin, fora do escopo deste UPDATE.
+ */
+export async function cancelarTransacoesAbertasDoServico(idServico: string): Promise<number> {
+  const { rowCount } = await pool.query(
+    `UPDATE transacoes
+        SET status = 'CANCELADA'::status_transacao_enum,
+            respondido_em = COALESCE(respondido_em, NOW())
+      WHERE id_servico = $1
+        AND status = ANY(ARRAY['AGUARDANDO_CONFIRMACAO_CLIENTE','AGUARDANDO_PAGAMENTO']::status_transacao_enum[])`,
+    [idServico],
+  );
+  return rowCount ?? 0;
+}
+
+/* ============================================================================
+   CONCILIAÇÃO DA COMISSÃO (admin) -- pedido explícito: "status_repasse
+   (pendente/concluído)", reinterpretado para este modelo como a comissão da
+   PLATAFORMA (não um repasse ao profissional -- ver comentário na migração
+   15). Só um admin confirma; ver `middlewares/autenticacao.ts` (`exigirPapel('admin')`).
    ========================================================================= */
 
-export async function criarEventoWebhook(dados: {
-  gateway: string;
-  tipoEvento: string;
-  idEventoExterno: string;
-  payload: unknown;
-}): Promise<{ id_evento: string } | null> {
-  try {
-    const { rows } = await pool.query<{ id_evento: string }>(
-      `INSERT INTO eventos_webhook_pagamento (gateway, tipo_evento, id_evento_externo, payload)
-       VALUES ($1, $2, $3, $4::jsonb)
-       RETURNING id_evento`,
-      [dados.gateway, dados.tipoEvento, dados.idEventoExterno, JSON.stringify(dados.payload)],
-    );
-    return rows[0];
-  } catch (erro) {
-    if (ehViolacaoDeUnicidade(erro)) {
-      return null; // reentrega do mesmo evento -- idempotência via UNIQUE do banco
-    }
-    throw erro;
-  }
+export interface DadosConciliacaoRepasse {
+  adminId: string;
+  referencia?: string;
 }
 
-function ehViolacaoDeUnicidade(erro: unknown): boolean {
-  return typeof erro === 'object' && erro !== null && 'code' in erro && (erro as { code: string }).code === '23505';
-}
-
-export async function marcarEventoProcessado(idEvento: string, idTransacao: string | null): Promise<void> {
-  await pool.query(
-    `UPDATE eventos_webhook_pagamento
-        SET processado_em = NOW(), id_transacao = $2
-      WHERE id_evento = $1`,
-    [idEvento, idTransacao],
+export async function confirmarRepasseComissao(
+  idTransacao: string,
+  dados: DadosConciliacaoRepasse,
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE transacoes
+        SET status_repasse = 'CONCLUIDO'::status_repasse_enum,
+            repasse_confirmado_em = NOW(),
+            repasse_confirmado_por_admin_id = $2,
+            referencia_repasse = $3
+      WHERE id_transacao = $1
+        AND status = 'LIBERADA'::status_transacao_enum
+        AND status_repasse = 'PENDENTE'::status_repasse_enum`,
+    [idTransacao, dados.adminId, dados.referencia ?? null],
   );
+  return (rowCount ?? 0) > 0;
 }
 
-export async function marcarEventoComErro(idEvento: string, mensagemErro: string): Promise<void> {
-  await pool.query(
-    `UPDATE eventos_webhook_pagamento SET erro_processamento = $2 WHERE id_evento = $1`,
-    [idEvento, mensagemErro.slice(0, 2000)],
+/** Fila de conciliação do admin -- toda transação já LIBERADA cuja comissão ainda não foi confirmada como recebida. */
+export async function listarTransacoesPendentesDeRepasse(): Promise<Transacao[]> {
+  const { rows } = await pool.query<Transacao>(
+    `${SELECT_TRANSACAO}
+      WHERE status = 'LIBERADA'::status_transacao_enum
+        AND status_repasse = 'PENDENTE'::status_repasse_enum
+      ORDER BY liberado_em ASC`,
   );
+  return rows;
+}
+
+/**
+ * Resumo financeiro para o dashboard do admin -- "Saldo de Comissão"
+ * (pedido explícito do usuário). `comissao_pendente` é o que ainda falta
+ * conciliar; `comissao_conciliada` é o que já foi confirmado como recebido.
+ * Somas feitas em SQL (aritmética NUMERIC exata), nunca em JS.
+ */
+export interface ResumoFinanceiroAdmin {
+  comissao_pendente: string;
+  comissao_conciliada: string;
+  valor_repasse_total_liberado: string;
+  quantidade_liberada: number;
+}
+
+export async function buscarResumoFinanceiroAdmin(): Promise<ResumoFinanceiroAdmin> {
+  const { rows } = await pool.query<{
+    comissao_pendente: string;
+    comissao_conciliada: string;
+    valor_repasse_total_liberado: string;
+    quantidade_liberada: string;
+  }>(
+    `SELECT
+       COALESCE(SUM(taxa_comissao) FILTER (WHERE status_repasse = 'PENDENTE'), 0)::text  AS comissao_pendente,
+       COALESCE(SUM(taxa_comissao) FILTER (WHERE status_repasse = 'CONCLUIDO'), 0)::text AS comissao_conciliada,
+       COALESCE(SUM(valor_repasse), 0)::text                                             AS valor_repasse_total_liberado,
+       COUNT(*)::text                                                                    AS quantidade_liberada
+     FROM transacoes
+     WHERE status = 'LIBERADA'::status_transacao_enum`,
+  );
+  const linha = rows[0];
+  return {
+    comissao_pendente: linha.comissao_pendente,
+    comissao_conciliada: linha.comissao_conciliada,
+    valor_repasse_total_liberado: linha.valor_repasse_total_liberado,
+    quantidade_liberada: Number(linha.quantidade_liberada),
+  };
 }

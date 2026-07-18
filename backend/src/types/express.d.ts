@@ -22,14 +22,11 @@ declare global {
 
       /**
        * Bytes CRUS do body, antes do `express.json()` desserializar --
-       * preenchido pelo `verify` callback em `app.ts`. Existe só para o
-       * webhook de pagamentos (`routes/pagamentos.routes.ts`): a
-       * assinatura HMAC do Pagar.me (`X-Hub-Signature-256`) é calculada
-       * sobre os bytes EXATOS que o gateway enviou -- reserializar
-       * `req.body` de volta para JSON (`JSON.stringify`) não garante o
-       * mesmo texto byte a byte (ordem de chaves, espaçamento), então
-       * validar a assinatura contra o objeto já parseado seria frágil.
-       * Qualquer outra rota pode ignorar este campo.
+       * preenchido pelo `verify` callback em `app.ts`. Não é lido por
+       * nenhuma rota hoje (o webhook de pagamentos verifica só um segredo
+       * simples em header, não uma assinatura HMAC) -- mantido pronto para
+       * quando a futura API Pix própria (`services/pix-proprio.ts`) definir
+       * um esquema de assinatura sobre o corpo bruto.
        */
       rawBody?: Buffer;
     }

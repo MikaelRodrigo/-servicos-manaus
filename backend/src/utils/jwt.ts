@@ -4,10 +4,12 @@ import { env } from '../env';
 /**
  * "Papel" do usuário dentro do app. Note que, diferente de muitos tutoriais,
  * aqui isso NÃO é uma coluna "role" numa tabela única de usuários -- é o
- * reflexo direto de qual tabela a pessoa está cadastrada (profissionais ou
- * clientes), decidida no schema desde a Etapa 1.
+ * reflexo direto de qual tabela a pessoa está cadastrada (profissionais,
+ * clientes, ou -- desde a migração 15 -- admins, para gerenciar a
+ * conciliação de comissão). `admin` nunca se autocadastra (sem rota POST
+ * /auth/cadastro/admin) -- ver comentário em `database/15_*.sql`.
  */
-export type Papel = 'cliente' | 'profissional';
+export type Papel = 'cliente' | 'profissional' | 'admin';
 
 /** O que vai DENTRO do token. Nunca, jamais, inclua senha_hash aqui. */
 export interface PayloadToken {

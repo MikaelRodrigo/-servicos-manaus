@@ -23,6 +23,7 @@ import {
 import {
   buscarClientePorEmail,
   buscarProfissionalPorEmail,
+  buscarAdminPorEmail,
   criarClientePF,
   criarClientePJ,
   criarProfissionalPF,
@@ -194,18 +195,21 @@ authRouter.post(
 /* ============================================================================
    POST /auth/login
 
-   Body: { papel: "cliente" | "profissional", email, senha }
+   Body: { papel: "cliente" | "profissional" | "admin", email, senha }
 
    Repare que o cliente do app PRECISA dizer qual papel está tentando logar
    -- não adivinhamos, porque a mesma pessoa pode ter conta nas duas tabelas.
+   "admin" (migração 15) segue a MESMA rota -- só troca de onde busca o
+   usuário. Sem rota de cadastro correspondente: contas admin são criadas
+   por INSERT manual (ver `database/15_*.sql`), nunca por aqui.
    ========================================================================= */
 authRouter.post('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = req.body as Record<string, unknown>;
 
     const papel = body.papel;
-    if (papel !== 'cliente' && papel !== 'profissional') {
-      throw new ErroDeValidacao('O campo "papel" deve ser "cliente" ou "profissional".');
+    if (papel !== 'cliente' && papel !== 'profissional' && papel !== 'admin') {
+      throw new ErroDeValidacao('O campo "papel" deve ser "cliente", "profissional" ou "admin".');
     }
 
     const email = emailValido(body.email);
@@ -214,7 +218,9 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     const usuario =
       papel === 'cliente'
         ? await buscarClientePorEmail(email)
-        : await buscarProfissionalPorEmail(email);
+        : papel === 'profissional'
+          ? await buscarProfissionalPorEmail(email)
+          : await buscarAdminPorEmail(email);
 
     /* -----------------------------------------------------------------------
        MENSAGEM GENÉRICA DE PROPÓSITO.

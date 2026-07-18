@@ -66,26 +66,34 @@ export const env = {
     publicUrlBase: obrigatoria('S3_PUBLIC_URL_BASE'),
   },
 
-  // Gateway de pagamento (migração 14 -- Escrow + Split). DIFERENTE de todo
-  // o resto deste arquivo: as duas chaves aqui NÃO são `obrigatoria(...)`.
-  // Se fossem, o servidor inteiro recusaria subir para qualquer dev/
-  // ambiente que ainda não tenha uma conta Pagar.me configurada -- e hoje
-  // isso é a maioria (o módulo de pagamentos é aditivo, o resto do app
-  // funciona sem ele). Em vez disso, a ausência só vira erro NA HORA de
-  // efetivamente chamar o gateway (ver `services/gateway-pagamento.ts`,
-  // `exigirCredenciais()`) -- um servidor sem Pagar.me configurado sobe
-  // normalmente; só as rotas de /pagamentos que dependem do gateway falham,
-  // com uma mensagem clara.
-  pagarme: {
-    // Chave secreta da API (formato "sk_..." em produção, "sk_test_..." em
-    // sandbox) -- ver https://docs.pagar.me/docs/chaves-de-acesso. Usada
-    // como usuário em HTTP Basic Auth (senha vazia), conforme a API v5.
-    apiKey: process.env.PAGARME_API_KEY,
-    // Segredo usado para validar a assinatura HMAC de cada webhook
-    // recebido (cabeçalho `X-Hub-Signature-256`) -- sem isso, QUALQUER UM
-    // que descubra a URL do webhook conseguiria forjar um "pagamento
-    // autorizado" falso. Configurado no painel do Pagar.me, na tela do
-    // próprio webhook.
-    webhookSecret: process.env.PAGARME_WEBHOOK_SECRET,
+  // API Pix própria (migração 15 -- substituiu o Pagar.me). DIFERENTE de
+  // todo o resto deste arquivo: nenhuma chave aqui é `obrigatoria(...)`.
+  // O usuário ainda vai CONSTRUIR essa API ("Eu criarei uma api, integrada
+  // a minha conta pix jurídica") -- hoje ela não existe. Enquanto
+  // `baseUrl` não estiver definida, `services/pix-proprio.ts` roda em MODO
+  // SIMULADO (gera uma cobrança fake na hora, sem chamar nada de verdade)
+  // -- é o que permite o resto do fluxo (proposta -> confirmação ->
+  // retenção -> liberação) ser testado ponta a ponta já, sem esperar essa
+  // API ficar pronta. Configure as três variáveis quando ela existir.
+  pixProprio: {
+    baseUrl: process.env.PIX_PROPRIO_BASE_URL,
+    apiKey: process.env.PIX_PROPRIO_API_KEY,
+    // Segredo compartilhado para validar quem chama POST /pagamentos/webhook
+    // (a futura API própria avisando "este Pix caiu"). Comparação simples
+    // (não HMAC) de propósito -- o formato de assinatura da API própria
+    // ainda não existe para ser implementado direito; troque por HMAC (ver
+    // o padrão já usado antes para o Pagar.me, git-log deste arquivo) assim
+    // que o formato real dela for definido.
+    webhookSecret: process.env.PIX_PROPRIO_WEBHOOK_SECRET,
   },
+
+  // Percentual retido pela plataforma sobre cada serviço (pedido do
+  // usuário: "8,9%", o número mais recente e específico -- a mensagem
+  // inicial dizia "8%"; ver o comentário em `database/15_*.sql`, Seção 4).
+  // Configurável aqui, NUNCA hardcoded no código de rota -- trocar a taxa é
+  // mudar uma variável de ambiente, não editar SQL nem TypeScript. Cada
+  // transação grava o percentual VIGENTE no momento (não uma referência
+  // viva a esta constante), então mudar isto não altera o histórico já
+  // gravado -- só as próximas propostas.
+  comissaoPlataformaPercentual: numero('COMISSAO_PLATAFORMA_PERCENTUAL', 8.9),
 } as const;

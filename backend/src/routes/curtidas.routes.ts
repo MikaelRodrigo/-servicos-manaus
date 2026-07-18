@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { uuidObrigatorio, ErroNaoEncontrado } from '../utils/validacao';
-import { exigirAutenticacao } from '../middlewares/autenticacao';
+import { exigirAutenticacao, exigirPapel } from '../middlewares/autenticacao';
 import {
   avaliacaoProfissionalExiste,
   alternarCurtidaAvaliacao,
@@ -35,6 +35,11 @@ export const curtidasRouter = Router();
 curtidasRouter.post(
   '/:avaliacaoId/curtir',
   exigirAutenticacao,
+  // "Curtir" só faz sentido para cliente/profissional (é quem navega o
+  // portfólio) -- admin (migração 15) nunca deveria chamar esta rota; esta
+  // checagem também é o que restringe o tipo de `papel` abaixo para
+  // `alternarCurtidaAvaliacao`, que nunca soube (nem precisa saber) de "admin".
+  exigirPapel('cliente', 'profissional'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const avaliacaoId = uuidObrigatorio(req.params.avaliacaoId, 'avaliacaoId');
@@ -45,6 +50,9 @@ curtidasRouter.post(
       }
 
       const { sub, papel } = req.usuario!;
+      if (papel !== 'cliente' && papel !== 'profissional') {
+        throw new ErroNaoEncontrado('Avaliação não encontrada.'); // inalcançável -- exigirPapel já bloqueou acima
+      }
       const resultado = await alternarCurtidaAvaliacao(avaliacaoId, sub, papel);
 
       return res.json({ curtido: resultado.curtido, total_curtidas: resultado.totalCurtidas });

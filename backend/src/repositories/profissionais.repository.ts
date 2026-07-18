@@ -565,25 +565,23 @@ export async function removerTagDoProfissional(
 }
 
 /**
- * `chave_pix`/`id_recebedor_gateway` -- as duas colunas da migração 14
- * (Split de Pagamento). Função dedicada (em vez de acrescentar essas
- * colunas em `buscarPerfilPublico`) porque isto é consumido só pelo
- * BACKEND internamente, na hora de liberar um repasse
- * (`routes/pagamentos.routes.ts`) -- nunca deveria vazar no perfil público
+ * `chave_pix` -- a chave que o PRÓPRIO profissional cadastra, para onde a
+ * cobrança gerada na confirmação do cliente aponta (migração 15 -- modelo
+ * de intermediação; substitui `buscarDadosProfissionalParaGateway`, que
+ * também devolvia `id_recebedor_gateway`, uma subconta do Pagar.me que não
+ * existe mais). Função dedicada (em vez de acrescentar em
+ * `buscarPerfilPublico`) porque isto é consumido só pelo BACKEND
+ * internamente, na hora de gerar a cobrança (`routes/pagamentos.routes.ts`
+ * -> `services/pix-proprio.ts`) -- nunca deveria vazar no perfil público
  * que qualquer visitante do app consegue ver.
  */
-export interface DadosProfissionalParaGateway {
-  chavePix: string | null;
-  idRecebedorGateway: string | null;
-}
-
-export async function buscarDadosProfissionalParaGateway(
+export async function buscarChavePixDoProfissional(
   profissionalId: string,
-): Promise<DadosProfissionalParaGateway | null> {
-  const { rows } = await pool.query<{ chave_pix: string | null; id_recebedor_gateway: string | null }>(
-    `SELECT chave_pix, id_recebedor_gateway FROM profissionais WHERE profissional_id = $1`,
+): Promise<{ chavePix: string | null } | null> {
+  const { rows } = await pool.query<{ chave_pix: string | null }>(
+    `SELECT chave_pix FROM profissionais WHERE profissional_id = $1`,
     [profissionalId],
   );
   if (!rows[0]) return null;
-  return { chavePix: rows[0].chave_pix, idRecebedorGateway: rows[0].id_recebedor_gateway };
+  return { chavePix: rows[0].chave_pix };
 }

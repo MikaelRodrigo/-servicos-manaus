@@ -12,7 +12,7 @@ import { pagamentosRouter } from './routes/pagamentos.routes';
 import { ErroDeValidacao, ErroDeConflito, ErroNaoEncontrado } from './utils/validacao';
 import { ErroDeAutenticacao } from './middlewares/autenticacao';
 import { ehErroDeUpload, mensagemDeErroUpload } from './middlewares/upload';
-import { ErroDeGateway } from './services/gateway-pagamento';
+import { ErroDePixProprio } from './services/pix-proprio';
 
 export const app = express();
 
@@ -32,13 +32,13 @@ app.use(cors());
 //
 // `verify` -- guarda os BYTES CRUS do body em `req.rawBody` antes do parse,
 // além do parse normal continuar acontecendo (`req.body` funciona em toda
-// rota exatamente como sempre funcionou). Existe só para o webhook de
-// pagamentos (`routes/pagamentos.routes.ts`): a assinatura HMAC que o
-// Pagar.me manda é calculada sobre os bytes EXATOS da requisição --
-// reserializar `req.body` de volta com `JSON.stringify` não reproduz
-// necessariamente o mesmo texto (ordem de chaves, espaçamento), então
-// validar contra o objeto já parseado seria frágil. Nenhuma outra rota
-// paga custo por isso além de guardar uma referência ao Buffer.
+// rota exatamente como sempre funcionou). Hoje o webhook de pagamentos
+// (`routes/pagamentos.routes.ts`) verifica só um segredo simples num header
+// (`X-Webhook-Secret`), não uma assinatura HMAC sobre os bytes -- então
+// `req.rawBody` não é lido por nada no momento. Mantido pronto mesmo assim:
+// quando a API Pix própria existir de verdade (ver services/pix-proprio.ts)
+// e definir um esquema de assinatura HMAC sobre o corpo bruto, este campo
+// já vai estar disponível sem precisar mexer aqui.
 app.use(
   express.json({
     limit: '100kb',
@@ -112,12 +112,12 @@ app.use((erro: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return res.status(400).json({ erro: mensagemDeErroUpload(erro) });
   }
 
-  // Gateway de pagamento recusou/falhou/está fora do ar, ou as credenciais
-  // não estão configuradas -> 502 (Bad Gateway). Loga o detalhe completo
-  // no servidor (pode conter informação de diagnóstico do gateway que não
-  // deveria ir para o cliente final) e devolve uma mensagem genérica.
-  if (erro instanceof ErroDeGateway) {
-    console.error('[erro] Gateway de pagamento:', erro.message);
+  // API Pix própria recusou/falhou/está fora do ar, ou a integração real
+  // ainda não foi implementada (ver services/pix-proprio.ts) -> 502 (Bad
+  // Gateway). Loga o detalhe completo no servidor e devolve uma mensagem
+  // genérica.
+  if (erro instanceof ErroDePixProprio) {
+    console.error('[erro] API Pix própria:', erro.message);
     return res.status(502).json({ erro: 'Não foi possível completar a operação de pagamento agora.' });
   }
 

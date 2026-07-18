@@ -2,15 +2,15 @@ import { pool } from '../database';
 import { StatusDisputa } from '../utils/validacao';
 
 /* ============================================================================
-   `disputas_transacao` (migração 14) -- o ticket de mediação aberto pelo
-   REPORT_ISSUE do cliente (Etapa C). Este arquivo só cobre ABERTURA da
-   disputa -- a RESOLUÇÃO (mediação decidindo a favor de um lado) fica de
-   fora de propósito: resolver uma disputa é uma ação administrativa, e o
-   projeto ainda não tem um papel "admin" no sistema de autenticação
-   (`Papel = 'cliente' | 'profissional'`, ver utils/jwt.ts) -- não dá para
-   proteger esse endpoint corretamente sem inventar um mecanismo de auth
-   novo, o que é uma decisão de produto, não um detalhe de implementação.
-   `resolverDisputa` abaixo existe pronta para quando isso for decidido.
+   `disputas_transacao` (migração 14, mantida pela migração 15) -- o ticket
+   de mediação aberto pelo cliente. Este arquivo só cobre ABERTURA e
+   RESOLUÇÃO manual da disputa -- desde a migração 15 já existe um papel
+   "admin" (`Papel = 'cliente' | 'profissional' | 'admin'`, ver utils/jwt.ts)
+   capaz de proteger uma rota de resolução (`exigirPapel('admin')`), mas
+   NENHUMA ROTA chama `resolverDisputa` ainda -- o novo fluxo de pagamento
+   (migração 15, `routes/pagamentos.routes.ts`) não reabriu a integração de
+   disputas (não fazia parte do pedido que motivou a remoção do Pagar.me).
+   Fica pronta para quando isso for retomado.
 
    REMOVIDO DE PROPÓSITO: o cálculo automático de dano (desconto de 30% do
    profissional / reembolso de 20% extra da plataforma) que uma versão
