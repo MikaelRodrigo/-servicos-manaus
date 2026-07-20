@@ -308,6 +308,73 @@ export async function buscarProximos(
 }
 
 /**
+ * Perfil PRIVADO do profissional -- só o próprio profissional vê isso
+ * (rota exige `exigirAutenticacao` + `exigirPapel('profissional')`, e o ID
+ * usado é sempre `req.usuario.sub`, nunca um `:id` da URL). Espelha
+ * `PerfilCliente` em clientes.repository.ts: por ser sempre o DONO
+ * acessando os próprios dados, `email`/`contato` podem aparecer sem
+ * problema aqui -- diferente de `PerfilPublicoProfissional` logo abaixo,
+ * que nunca inclui esses dois campos (risco de scraping numa rota sem
+ * autenticação).
+ */
+export interface PerfilProfissional {
+  profissional_id: string;
+  tipo_pessoa: 'PF' | 'PJ';
+  nome_exibicao: string;
+  email: string;
+  contato: string;
+  /** Texto livre (número/complemento/referência) -- migração 16. `null` até o profissional preencher. */
+  endereco: string | null;
+  atuacao: string | null;
+  categoria: string | null;
+  descricao: string | null;
+  url_foto_perfil: string | null;
+  cep: string | null;
+  /** Endereço FORMATADO, derivado da geocodificação do CEP (migração 08) -- não editável diretamente. */
+  endereco_atuacao: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  subcategorias: TagSubcategoria[];
+}
+
+/**
+ * Busca os dados do PRÓPRIO profissional logado -- usado por
+ * GET /profissionais/me. Antes desta função, a tela de editar perfil
+ * (Flutter) usava `buscarPerfilPublico` (com o próprio ID) para se
+ * autoalimentar -- funcionava para descricao/CEP/foto, mas `email` e
+ * `contato` nunca vinham (a query pública nunca os expõe), então não
+ * existia como pré-preencher nem exibir esses dois campos na tela. Esta
+ * função privada resolve isso.
+ */
+export async function buscarMeuPerfil(profissionalId: string): Promise<PerfilProfissional | null> {
+  const { rows } = await pool.query<PerfilProfissional>(
+    `SELECT
+       p.profissional_id,
+       p.tipo_pessoa,
+       COALESCE(p.nome, p.razao_social) AS nome_exibicao,
+       p.email,
+       p.contato,
+       p.endereco,
+       sc.nome                          AS atuacao,
+       c.nome                           AS categoria,
+       p.descricao,
+       p.url_foto_perfil,
+       p.cep,
+       p.endereco_atuacao,
+       p.latitude,
+       p.longitude,
+       tags_agg.lista                   AS subcategorias
+     FROM profissionais p
+     LEFT JOIN subcategorias sc ON sc.subcategoria_id = p.subcategoria_id
+     LEFT JOIN categorias c ON c.categoria_id = p.categoria_id
+     ${SQL_TAGS_SUBCATEGORIAS}
+     WHERE p.profissional_id = $1`,
+    [profissionalId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
  * Perfil público completo -- a "carteira de visitas" que o app mostra ao
  * tocar num pino do mapa.
  *
@@ -387,6 +454,10 @@ export interface AtualizacaoPerfilProfissional {
    */
   categoriaId?: number;
   subcategoriaId?: number;
+  /** Telefone/WhatsApp, só dígitos -- migração 16 (antes só era gravado no cadastro, nunca editável depois). */
+  contato?: string;
+  /** Texto livre (número/complemento/referência) -- migração 16. */
+  endereco?: string;
 }
 
 /**
@@ -399,12 +470,16 @@ export interface AtualizacaoPerfilProfissional {
  * valor que já estava na coluna -- só substitui quando um valor de verdade é
  * passado. É "atualização parcial" sem montar SQL dinâmico, no mesmo
  * espírito do filtro opcional de `profissao` em `buscarProximos` acima.
+ *
+ * Devolve o formato PRIVADO (`PerfilProfissional`, com email/contato) -- não
+ * o público -- porque quem chama isto é sempre o PRÓPRIO dono editando os
+ * próprios dados (mesmo raciocínio de `buscarMeuPerfil` acima).
  */
 export async function atualizarPerfilProfissional(
   profissionalId: string,
   dados: AtualizacaoPerfilProfissional,
-): Promise<PerfilPublicoProfissional> {
-  const { rows } = await pool.query<PerfilPublicoProfissional>(
+): Promise<PerfilProfissional> {
+  const { rows } = await pool.query<PerfilProfissional>(
     `WITH atualizado AS (
        UPDATE profissionais
           SET descricao        = COALESCE($2, descricao),
@@ -414,7 +489,9 @@ export async function atualizarPerfilProfissional(
               longitude        = COALESCE($6, longitude),
               endereco_atuacao = COALESCE($7, endereco_atuacao),
               categoria_id     = COALESCE($8, categoria_id),
-              subcategoria_id  = COALESCE($9, subcategoria_id)
+              subcategoria_id  = COALESCE($9, subcategoria_id),
+              contato          = COALESCE($10, contato),
+              endereco         = COALESCE($11, endereco)
         WHERE profissional_id = $1
         RETURNING *
      )
@@ -422,10 +499,14 @@ export async function atualizarPerfilProfissional(
        p.profissional_id,
        p.tipo_pessoa,
        COALESCE(p.nome, p.razao_social) AS nome_exibicao,
+       p.email,
+       p.contato,
+       p.endereco,
        sc.nome                          AS atuacao,
        c.nome                           AS categoria,
        p.descricao,
        p.url_foto_perfil,
+       p.cep,
        p.latitude,
        p.longitude,
        p.endereco_atuacao,
@@ -444,9 +525,103 @@ export async function atualizarPerfilProfissional(
       dados.enderecoAtuacao ?? null,
       dados.categoriaId ?? null,
       dados.subcategoriaId ?? null,
+      dados.contato ?? null,
+      dados.endereco ?? null,
     ],
   );
   return rows[0];
+}
+
+/* ============================================================================
+   PORTFÓLIO VISUAL (migração 16) -- galeria de fotos que o PRÓPRIO
+   profissional escolhe subir para mostrar seu trabalho. Diferente por
+   completo de `vw_historico_portifolio` (avaliacoes.repository.ts): aquele
+   é fotos que o CLIENTE anexa numa avaliação de um serviço concluído; este
+   é uma vitrine curada pelo profissional, sem vínculo com nenhum serviço.
+   ========================================================================= */
+
+export interface FotoPortfolio {
+  id_foto: string;
+  url_foto: string;
+  legenda: string | null;
+  ordem: number;
+  created_at: string;
+}
+
+const SELECT_FOTO_PORTFOLIO = `
+  SELECT id_foto, url_foto, legenda, ordem, created_at
+    FROM portfolio_profissional
+`;
+
+/** Todas as fotos de UM profissional, na ordem de exibição -- usada tanto pela vitrine pública quanto pela tela de edição do dono. */
+export async function listarPortfolioFotos(profissionalId: string): Promise<FotoPortfolio[]> {
+  const { rows } = await pool.query<FotoPortfolio>(
+    `${SELECT_FOTO_PORTFOLIO} WHERE profissional_id = $1 ORDER BY ordem ASC, created_at ASC`,
+    [profissionalId],
+  );
+  return rows;
+}
+
+/** Quantas fotos o profissional já tem -- usado para aplicar o teto (ver `MAX_FOTOS_PORTFOLIO` em upload.ts) antes de aceitar um novo lote. */
+export async function contarFotosPortfolio(profissionalId: string): Promise<number> {
+  const { rows } = await pool.query<{ total: string }>(
+    `SELECT COUNT(*)::text AS total FROM portfolio_profissional WHERE profissional_id = $1`,
+    [profissionalId],
+  );
+  return Number(rows[0]?.total ?? '0');
+}
+
+/**
+ * Adiciona um LOTE de fotos novas ao portfólio, sempre no FIM da ordem
+ * atual (`ordem_base + índice do array`) -- não existe reordenação manual
+ * ainda, então "adicionar" sempre significa "no final da vitrine".
+ * Devolve a lista COMPLETA atualizada (mesmo padrão de
+ * `adicionarTagAoProfissional`), para o app não precisar de uma segunda
+ * chamada só para atualizar a tela.
+ */
+export async function adicionarFotosPortfolio(
+  profissionalId: string,
+  fotos: { urlFoto: string; legenda?: string }[],
+): Promise<FotoPortfolio[]> {
+  const { rows } = await pool.query<{ max_ordem: number | null }>(
+    `SELECT MAX(ordem) AS max_ordem FROM portfolio_profissional WHERE profissional_id = $1`,
+    [profissionalId],
+  );
+  const ordemBase = (rows[0]?.max_ordem ?? -1) + 1;
+
+  // INSERT em lote, um VALUES por foto -- o número de fotos por chamada é
+  // pequeno (teto de MAX_FOTOS_PORTFOLIO no upload.ts), então montar os
+  // placeholders dinamicamente aqui é seguro (nenhum VALOR de usuário vira
+  // parte do texto SQL, só a QUANTIDADE de parâmetros muda).
+  const valores: unknown[] = [profissionalId];
+  const linhasValues = fotos.map((foto, indice) => {
+    const pUrl = valores.push(foto.urlFoto);
+    const pLegenda = valores.push(foto.legenda ?? null);
+    const pOrdem = valores.push(ordemBase + indice);
+    return `($1, $${pUrl}, $${pLegenda}, $${pOrdem})`;
+  });
+
+  await pool.query(
+    `INSERT INTO portfolio_profissional (profissional_id, url_foto, legenda, ordem)
+     VALUES ${linhasValues.join(', ')}`,
+    valores,
+  );
+
+  return listarPortfolioFotos(profissionalId);
+}
+
+/**
+ * Remove UMA foto -- a condição `profissional_id = $2` na cláusula WHERE
+ * garante, DENTRO DO PRÓPRIO SQL, que ninguém remove foto de outro
+ * profissional mesmo que descubra o UUID de uma foto alheia (não depende
+ * só da rota lembrar de checar ownership antes de chamar isto).
+ */
+export async function removerFotoPortfolio(profissionalId: string, idFoto: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `DELETE FROM portfolio_profissional WHERE id_foto = $1 AND profissional_id = $2`,
+    [idFoto, profissionalId],
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 /* ============================================================================

@@ -2,11 +2,16 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { env } from '../env';
 import {
   buscarProximos,
+  buscarMeuPerfil,
   buscarPerfilPublico,
   atualizarPerfilProfissional,
   listarTagsDoProfissional,
   adicionarTagAoProfissional,
   removerTagDoProfissional,
+  listarPortfolioFotos,
+  contarFotosPortfolio,
+  adicionarFotosPortfolio,
+  removerFotoPortfolio,
 } from '../repositories/profissionais.repository';
 import {
   numeroObrigatorio,
@@ -22,7 +27,13 @@ import {
 } from '../utils/validacao';
 import { buscarPortifolio, buscarResumoDeAvaliacoes } from '../repositories/avaliacoes.repository';
 import { exigirAutenticacao, exigirPapel, autenticacaoOpcional } from '../middlewares/autenticacao';
-import { uploadFotoPerfil, urlPublicaDoArquivoPerfil } from '../middlewares/upload';
+import {
+  uploadFotoPerfil,
+  urlPublicaDoArquivoPerfil,
+  uploadFotosPortfolio,
+  urlsPublicasDosArquivos,
+  MAX_FOTOS_TOTAL_PORTFOLIO,
+} from '../middlewares/upload';
 import { buscarLocalizacaoPorCep } from '../services/cep';
 import { ehErroDePostgres, PG_FOREIGN_KEY_VIOLATION } from '../utils/erros-postgres';
 
@@ -173,14 +184,45 @@ profissionaisRouter.get(
 );
 
 /* ============================================================================
+   GET /profissionais/me -- PRIVADA (exige login, só "profissional").
+
+   Devolve os dados do PRÓPRIO profissional logado: nome, e-mail, contato,
+   endereço, descrição, CEP, foto de perfil, especialidades. Diferente de
+   `GET /profissionais/:id` (pública): esta inclui `email`/`contato`, porque
+   só o dono do token consegue chamá-la. É o que alimenta a tela de editar
+   perfil -- antes dela, a tela usava a rota pública (com o próprio ID), que
+   nunca devolvia `contato`, então não existia como editar esse campo (ver
+   comentário em `buscarMeuPerfil`, profissionais.repository.ts).
+
+   Precisa ficar registrada ANTES de `/:id` abaixo, mesma pegadinha de
+   sempre: se viesse depois, "/me" seria capturado pelo `:id`.
+   ========================================================================= */
+profissionaisRouter.get(
+  '/me',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const perfil = await buscarMeuPerfil(req.usuario!.sub);
+      if (!perfil) {
+        throw new ErroNaoEncontrado('Profissional não encontrado.');
+      }
+      return res.json(perfil);
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
    PATCH /profissionais/me -- PRIVADA (exige login, só "profissional").
 
-   Edita o PRÓPRIO perfil público: descrição ("sobre mim"), CEP (que define
-   onde o profissional aparece no mapa) e/ou foto de perfil. Repare que não
-   existe `:id` na URL -- de propósito. O profissional editado é sempre
-   `req.usuario.sub` (quem está logado), nunca um ID escolhido no corpo da
-   request. Isso elimina de saída qualquer risco de um profissional editar
-   o perfil de outro só trocando um ID no JSON.
+   Edita o PRÓPRIO perfil: descrição ("sobre mim"), CEP (que define onde o
+   profissional aparece no mapa), contato, endereço (texto livre) e/ou foto
+   de perfil. Repare que não existe `:id` na URL -- de propósito. O
+   profissional editado é sempre `req.usuario.sub` (quem está logado), nunca
+   um ID escolhido no corpo da request. Isso elimina de saída qualquer risco
+   de um profissional editar o perfil de outro só trocando um ID no JSON.
 
    Content-Type: multipart/form-data
    Campos (todos opcionais, mas ao menos um precisa vir):
@@ -193,6 +235,10 @@ profissionaisRouter.get(
      subcategoria_id (inteiro)    nenhum. A FK composta da migração 09
                     (fk_profissionais_subcategoria_categoria) recusa um par
                     incoerente -- ver SeletorCategoriaCascata no app.
+     contato        (texto, 11 dígitos -- telefone/WhatsApp; migração 16)
+     endereco       (texto, até 500 caracteres -- número/complemento/
+                    referência, livre; migração 16, NÃO confundir com
+                    "cep"/endereco_atuacao acima)
      foto_perfil    (arquivo -- JPEG, PNG ou WEBP, até 5 MB)
 
    É rota PATCH, não POST: estamos atualizando um recurso que já existe (o
@@ -231,14 +277,25 @@ profissionaisRouter.patch(
         );
       }
 
+      // `contato`/`endereco` -- migração 16. Mesma convenção de `cep` acima:
+      // "não veio" (undefined) é diferente de "veio vazio" -- só o segundo
+      // caso dispara a validação de formato.
+      const contato =
+        req.body.contato !== undefined && req.body.contato !== null && req.body.contato !== ''
+          ? apenasDigitos(req.body.contato, 'contato', 11)
+          : undefined;
+      const endereco = textoOpcional(req.body.endereco, 'endereco', 500);
+
       if (
         descricao === undefined &&
         cepBruto === undefined &&
         urlFotoPerfil === undefined &&
-        categoriaId === undefined
+        categoriaId === undefined &&
+        contato === undefined &&
+        endereco === undefined
       ) {
         throw new ErroDeValidacao(
-          'Envie ao menos "descricao", "cep", "categoria_id"/"subcategoria_id" ou uma foto ("foto_perfil") para atualizar.',
+          'Envie ao menos "descricao", "cep", "categoria_id"/"subcategoria_id", "contato", "endereco" ou uma foto ("foto_perfil") para atualizar.',
         );
       }
 
@@ -261,6 +318,8 @@ profissionaisRouter.patch(
         enderecoAtuacao: localizacao?.enderecoFormatado,
         categoriaId,
         subcategoriaId,
+        contato,
+        endereco,
       });
 
       return res.json(perfilAtualizado);
@@ -393,6 +452,112 @@ profissionaisRouter.get(
 );
 
 /* ============================================================================
+   PORTFÓLIO VISUAL (migração 16) -- galeria de fotos que o PRÓPRIO
+   profissional escolhe subir para mostrar seu trabalho. Diferente de
+   `GET /:id/portfolio` (mais abaixo), que é o histórico de AVALIAÇÕES com
+   foto anexada pelo CLIENTE -- este aqui é curado pelo profissional, sem
+   vínculo com nenhum serviço específico.
+
+   POST/DELETE precisam ficar registradas ANTES de `/:id` abaixo, mesma
+   pegadinha de sempre com rotas "/me/*".
+   ========================================================================= */
+
+/**
+ * POST /profissionais/me/portfolio-fotos -- PRIVADA (exige login, só "profissional").
+ *
+ * Content-Type: multipart/form-data
+ * Campo: fotos_portfolio (1 a 6 arquivos por chamada -- JPEG/PNG/WEBP, até 5MB cada)
+ *
+ * Recusa (400) se o LOTE mais o que já existe passar de
+ * `MAX_FOTOS_TOTAL_PORTFOLIO` -- checado ANTES de subir qualquer arquivo
+ * pro bucket (`contarFotosPortfolio` primeiro, upload depois), pra não
+ * gastar armazenamento com um lote que vai ser recusado de qualquer jeito.
+ *
+ * Devolve a galeria COMPLETA atualizada (mesmo padrão de
+ * `adicionarTagAoProfissional`).
+ */
+profissionaisRouter.post(
+  '/me/portfolio-fotos',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  // Pré-checagem RÁPIDA (antes do multer subir qualquer coisa pro bucket):
+  // se o profissional já está NO teto, recusa de cara -- evita gastar
+  // armazenamento com um lote que vai ser recusado de qualquer jeito. Não é
+  // a checagem FINAL (essa vem depois do upload, porque só ali sabemos
+  // quantos arquivos de fato vieram nesta chamada -- ver o handler abaixo).
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const totalAtual = await contarFotosPortfolio(req.usuario!.sub);
+      if (totalAtual >= MAX_FOTOS_TOTAL_PORTFOLIO) {
+        throw new ErroDeValidacao(
+          `Seu portfólio já tem o máximo de ${MAX_FOTOS_TOTAL_PORTFOLIO} fotos. Remova alguma antes de adicionar novas.`,
+        );
+      }
+      return next();
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+  uploadFotosPortfolio,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const arquivos = (req.files as Express.MulterS3.File[] | undefined) ?? [];
+      if (arquivos.length === 0) {
+        throw new ErroDeValidacao('Envie ao menos uma foto no campo "fotos_portfolio".');
+      }
+
+      // Checagem FINAL, exata: a pré-checagem acima só barrou quem já
+      // estava NO teto; esta cobre quem tinha espaço para MENOS fotos do
+      // que enviou (ex.: 2 vagas livres, mandou 4 no lote).
+      const totalAtual = await contarFotosPortfolio(req.usuario!.sub);
+      if (totalAtual + arquivos.length > MAX_FOTOS_TOTAL_PORTFOLIO) {
+        throw new ErroDeValidacao(
+          `Seu portfólio ficaria com ${totalAtual + arquivos.length} fotos -- o máximo é ${MAX_FOTOS_TOTAL_PORTFOLIO}. Envie menos fotos de uma vez ou remova alguma antes.`,
+        );
+      }
+
+      const urls = urlsPublicasDosArquivos(arquivos);
+      const galeria = await adicionarFotosPortfolio(
+        req.usuario!.sub,
+        urls.map((url) => ({ urlFoto: url })),
+      );
+
+      return res.status(201).json({ dados: galeria });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * DELETE /profissionais/me/portfolio-fotos/:idFoto -- PRIVADA (exige login, só "profissional").
+ *
+ * A checagem de ownership acontece DENTRO do SQL de `removerFotoPortfolio`
+ * (WHERE profissional_id = dono) -- devolve 404 tanto para uma foto que não
+ * existe quanto para uma que existe mas é de OUTRO profissional (a mesma
+ * resposta nos dois casos evita confirmar pra quem tentou que aquele UUID
+ * pertence a alguém).
+ */
+profissionaisRouter.delete(
+  '/me/portfolio-fotos/:idFoto',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const idFoto = uuidObrigatorio(req.params.idFoto, 'idFoto');
+      const removeu = await removerFotoPortfolio(req.usuario!.sub, idFoto);
+      if (!removeu) {
+        throw new ErroNaoEncontrado('Foto não encontrada.');
+      }
+      const galeria = await listarPortfolioFotos(req.usuario!.sub);
+      return res.json({ dados: galeria });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
    GET /profissionais/:id -- PÚBLICA (sem login).
 
    Perfil público completo: foto, descrição, atuação, endereço de atuação.
@@ -464,6 +629,30 @@ profissionaisRouter.get(
       );
 
       return res.json({ pagina, limite, total_retornado: portfolio.length, dados: portfolio });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
+   GET /profissionais/:id/portfolio-fotos -- PÚBLICA (sem login).
+
+   A galeria de fotos CURADA PELO PRÓPRIO PROFISSIONAL (migração 16) --
+   diferente de `GET /:id/portfolio` acima (histórico de avaliações com
+   foto anexada pelo cliente). Pública pelo mesmo motivo: é vitrine, precisa
+   convencer um cliente novo ANTES dele criar conta. Mesma função de
+   repository usada pela tela de edição do dono (`GET /profissionais/me`
+   não tem endpoint próprio de portfólio -- o dono chama esta MESMA rota
+   pública com o próprio ID, já que os dados não são sensíveis).
+   ========================================================================= */
+profissionaisRouter.get(
+  '/:id/portfolio-fotos',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const profissionalId = uuidObrigatorio(req.params.id, 'id');
+      const fotos = await listarPortfolioFotos(profissionalId);
+      return res.json({ dados: fotos });
     } catch (erro) {
       return next(erro);
     }

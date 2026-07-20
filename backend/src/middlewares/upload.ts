@@ -5,6 +5,12 @@ import { env } from '../env';
 /** Teto de fotos por avaliação. Ajuste aqui se um dia precisar de mais. */
 export const MAX_FOTOS_POR_AVALIACAO = 5;
 
+/** Teto de fotos por LOTE enviado de uma vez ao portfólio (migração 16) -- não é o teto TOTAL da galeria, só quantas cabem numa única chamada de upload. */
+export const MAX_FOTOS_POR_LOTE_PORTFOLIO = 6;
+
+/** Teto TOTAL de fotos no portfólio de um profissional -- checado no repository (`contarFotosPortfolio`) antes de aceitar um novo lote, não aqui (o multer só sabe quantas vieram NESTA requisição, não quantas já existem no banco). */
+export const MAX_FOTOS_TOTAL_PORTFOLIO = 24;
+
 /**
  * Middleware pronto para usar numa rota: `router.post('/x', uploadFotoServico, handler)`.
  *
@@ -52,6 +58,27 @@ export const uploadFotoPerfil = multer({
 }).single('foto_perfil');
 
 /**
+ * FOTOS DO PORTFÓLIO (migração 16) -- galeria curada pelo próprio
+ * profissional (`POST /profissionais/me/portfolio-fotos`), diferente de
+ * `uploadFotoServico` (fotos que o CLIENTE anexa numa avaliação). Prefixo
+ * próprio ("portfolio") para não misturar ciclo de vida com os outros dois.
+ *
+ * Espera um campo de formulário chamado EXATAMENTE "fotos_portfolio",
+ * podendo repetir várias vezes -- mesma convenção de `uploadFotoServico`.
+ * O teto TOTAL da galeria (`MAX_FOTOS_TOTAL_PORTFOLIO`) é responsabilidade
+ * da ROTA/repository (`contarFotosPortfolio`), não deste middleware -- o
+ * multer só enxerga os arquivos DESTA requisição, nunca quantos já
+ * existem no banco.
+ */
+export const uploadFotosPortfolio = multer({
+  storage: criarStorageS3('portfolio'),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+  fileFilter: filtroDeImagem,
+}).array('fotos_portfolio', MAX_FOTOS_POR_LOTE_PORTFOLIO);
+
+/**
  * multer lança sua PRÓPRIA classe de erro (`MulterError`) para problemas
  * como "arquivo grande demais" -- ela não é `ErroDeValidacao`. Este type
  * guard, no mesmo espírito de `ehErroDePostgres`, permite ao app.ts
@@ -61,11 +88,17 @@ export function ehErroDeUpload(erro: unknown): erro is multer.MulterError {
   return erro instanceof multer.MulterError;
 }
 
+// Mensagem genérica de propósito -- este mapa é COMPARTILHADO por todo
+// middleware de upload do arquivo (avaliação, perfil, portfólio), cada um
+// com seu próprio teto de quantidade (MAX_FOTOS_POR_AVALIACAO,
+// MAX_FOTOS_POR_LOTE_PORTFOLIO...). Citar um número fixo aqui seria
+// impreciso para os outros -- o `.array(...)` de cada middleware já barra
+// no teto certo; esta mensagem só precisa dizer QUE existe um limite.
 const MENSAGENS_DE_ERRO_MULTER: Partial<Record<string, string>> = {
   LIMIT_FILE_SIZE: 'A imagem excede o tamanho máximo permitido (5 MB).',
   LIMIT_UNEXPECTED_FILE: 'Campo de arquivo inesperado.',
-  LIMIT_FILE_COUNT: `Envie no máximo ${MAX_FOTOS_POR_AVALIACAO} fotos.`,
-  LIMIT_FIELD_COUNT: `Envie no máximo ${MAX_FOTOS_POR_AVALIACAO} fotos.`,
+  LIMIT_FILE_COUNT: 'Você enviou fotos demais de uma vez.',
+  LIMIT_FIELD_COUNT: 'Você enviou fotos demais de uma vez.',
 };
 
 export function mensagemDeErroUpload(erro: multer.MulterError): string {
