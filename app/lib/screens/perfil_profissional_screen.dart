@@ -56,12 +56,14 @@ class _PerfilProfissionalScreenState extends State<PerfilProfissionalScreen> {
       servico.buscarPerfilPublico(widget.profissionalId),
       servico.buscarResumoAvaliacoes(widget.profissionalId),
       servico.buscarPortfolio(widget.profissionalId),
+      servico.listarPortfolioFotos(widget.profissionalId),
     ]);
 
     return _DadosPerfil(
       perfil: resultados[0] as PerfilProfissional,
       resumo: resultados[1] as ResumoAvaliacoes,
       portfolio: resultados[2] as List<ItemPortfolio>,
+      fotosPortfolio: resultados[3] as List<FotoPortfolio>,
     );
   }
 
@@ -244,8 +246,16 @@ class _DadosPerfil {
   final PerfilProfissional perfil;
   final ResumoAvaliacoes resumo;
   final List<ItemPortfolio> portfolio;
+  /// Galeria curada pelo PRÓPRIO profissional (migração 16) -- distinta de
+  /// `portfolio` acima (histórico alimentado pelos CLIENTES via avaliação).
+  final List<FotoPortfolio> fotosPortfolio;
 
-  const _DadosPerfil({required this.perfil, required this.resumo, required this.portfolio});
+  const _DadosPerfil({
+    required this.perfil,
+    required this.resumo,
+    required this.portfolio,
+    required this.fotosPortfolio,
+  });
 }
 
 class _ConteudoPerfil extends StatelessWidget {
@@ -388,7 +398,23 @@ class _ConteudoPerfil extends StatelessWidget {
             ],
           ),
         ],
-        const SizedBox(height: 20),
+        // Fotos do trabalho (migração 16) -- galeria curada pelo PRÓPRIO
+        // profissional (antes/depois, ambiente, ferramentas etc.), 100%
+        // diferente do "Portfólio" mais abaixo (que é o histórico de
+        // AVALIAÇÕES, alimentado pelos clientes). Só aparece quando o
+        // profissional de fato subiu alguma foto -- galeria vazia não gera
+        // seção nenhuma na tela.
+        if (dados.fotosPortfolio.isNotEmpty) ...[
+          Text('Fotos do trabalho', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Fotos selecionadas pelo próprio profissional para mostrar seu trabalho.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          _GaleriaFotosPortfolio(fotos: dados.fotosPortfolio),
+          const SizedBox(height: 20),
+        ],
 
         FilledButton.icon(
           onPressed: aoSolicitarServico,
@@ -768,6 +794,62 @@ class _MiniaturasDeFotos extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Grade (não fileira única, ao contrário de `_MiniaturasDeFotos`) das
+/// fotos do portfólio VISUAL do profissional (migração 16) -- pensada para
+/// mostrar várias fotos de uma vez, já que aqui não há "uma avaliação por
+/// vez" para agrupar, é uma vitrine só. Toque numa miniatura abre a MESMA
+/// tela cheia (`_VisualizadorDeFotos`) já usada pelo histórico de
+/// avaliações, deslizável entre todas as fotos da galeria.
+class _GaleriaFotosPortfolio extends StatelessWidget {
+  final List<FotoPortfolio> fotos;
+
+  const _GaleriaFotosPortfolio({required this.fotos});
+
+  @override
+  Widget build(BuildContext context) {
+    final urls = fotos.map((f) => f.urlFoto).toList();
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (var indice = 0; indice < fotos.length; indice++)
+          _tileFoto(context, urls, indice),
+      ],
+    );
+  }
+
+  Widget _tileFoto(BuildContext context, List<String> urls, int indice) {
+    final urlFoto = ApiConfig.urlAbsoluta(urls[indice]);
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => _VisualizadorDeFotos(urls: urls, indiceInicial: indice),
+        ),
+      ),
+      borderRadius: BorderRadius.circular(8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: urlFoto != null
+            ? Image.network(
+                urlFoto,
+                width: 96,
+                height: 96,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 96,
+                  height: 96,
+                  color: Colors.grey.shade200,
+                  child: const Icon(Icons.broken_image, color: Colors.grey),
+                ),
+              )
+            : Container(width: 96, height: 96, color: Colors.grey.shade200),
       ),
     );
   }

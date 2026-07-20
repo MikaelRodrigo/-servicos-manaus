@@ -174,6 +174,26 @@ class ApiClient {
     );
   }
 
+  /// POST multipart -- usado para subir fotos no portfólio visual do
+  /// profissional (POST /profissionais/me/portfolio-fotos, campo
+  /// "fotos_portfolio", migração 16). Mesmo espírito de [postMultipart],
+  /// campo de arquivo diferente porque é uma coleção separada no backend
+  /// (ver comentário em upload.ts sobre prefixos distintos no S3).
+  Future<dynamic> postMultipartPortfolio(
+    String caminho, {
+    required List<Uint8List> arquivos,
+    required List<String> nomesArquivos,
+  }) {
+    return _enviarMultipart(
+      'POST',
+      caminho,
+      campos: const {},
+      nomeCampoArquivo: 'fotos_portfolio',
+      arquivos: arquivos,
+      nomesArquivos: nomesArquivos,
+    );
+  }
+
   /// PATCH multipart -- usado na edição de perfil do profissional
   /// (PATCH /profissionais/me, campo "foto_perfil"). PATCH porque estamos
   /// atualizando um recurso que já existe, não criando um novo. Continua

@@ -16,8 +16,10 @@ import '../providers/auth_provider.dart';
 import '../widgets/selecao_foto_perfil.dart';
 import '../widgets/selecao_tags_subcategorias.dart';
 
-/// Tela em que o PRÓPRIO profissional edita seu perfil público: foto,
-/// descrição ("sobre mim") e CEP. É o que alimenta os campos que antes
+/// Tela em que o PRÓPRIO profissional edita seu perfil: foto, descrição
+/// ("sobre mim"), CEP, contato, endereço e o portfólio visual (migração 16)
+/// -- tudo o que é refletido no perfil público que o cliente vê ao tocar no
+/// pino do profissional no mapa. É o que alimenta os campos que antes
 /// ficavam sempre `null` -- sem esta tela, ninguém teria como preencher
 /// `descricao`/`url_foto_perfil` depois do cadastro, nem aparecer na busca
 /// por proximidade do mapa (que depende de latitude/longitude).
@@ -31,7 +33,15 @@ class EditarPerfilScreen extends StatefulWidget {
 class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   final _descricaoController = TextEditingController();
   final _cepController = TextEditingController();
-  late Future<PerfilProfissional> _futuroPerfilAtual;
+  final _contatoController = TextEditingController();
+  final _enderecoController = TextEditingController();
+  late Future<MeuPerfilProfissional> _futuroPerfilAtual;
+
+  // Guardado à parte (não só dentro do Future) para servir de referência de
+  // "o que já está gravado" nos comparativos de `_salvar` (mesmo padrão de
+  // `PerfilClienteScreen._perfilCarregado`) -- evita mandar um PATCH de
+  // contato/endereço quando a pessoa não alterou nada neles.
+  MeuPerfilProfissional? _perfilCarregado;
 
   XFile? _fotoEscolhida;
   Uint8List? _bytesFotoEscolhida;
@@ -76,15 +86,25 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   bool _carregandoResumo = true;
   bool _erroResumo = false;
 
+  // Portfólio visual (migração 16) -- galeria curada pelo PRÓPRIO
+  // profissional, refletida no perfil público. Cada adição/remoção chama a
+  // API na hora (mesmo espírito das tags de especialidade acima), não fica
+  // dependendo do botão "Salvar perfil".
+  List<FotoPortfolio> _fotosPortfolio = [];
+  bool _carregandoFotos = true;
+  bool _enviandoFotos = false;
+
   @override
   void initState() {
     super.initState();
-    final meuId = context.read<AuthProvider>().usuario!.id;
-    _futuroPerfilAtual = ProfissionaisService.instancia.buscarPerfilPublico(meuId);
+    _futuroPerfilAtual = ProfissionaisService.instancia.buscarMeuPerfil();
     _futuroPerfilAtual.then((perfil) {
       if (!mounted) return;
       setState(() {
+        _perfilCarregado = perfil;
         _descricaoController.text = perfil.descricao ?? '';
+        _contatoController.text = perfil.contato ?? '';
+        _enderecoController.text = perfil.endereco ?? '';
         _urlFotoAtual = perfil.urlFotoPerfil;
         _enderecoAtualExibicao = perfil.enderecoAtuacao;
         _tags = perfil.subcategorias;
@@ -92,6 +112,62 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
     });
     _carregarCategorias();
     _carregarResumoDesempenho();
+    _carregarFotosPortfolio();
+  }
+
+  /// Busca a galeria já salva do profissional logado. Mesma rota pública
+  /// usada no perfil público (`GET /profissionais/:id/portfolio-fotos`) --
+  /// aqui é só chamada com o próprio id, ver comentário da rota no backend.
+  Future<void> _carregarFotosPortfolio() async {
+    try {
+      final meuId = context.read<AuthProvider>().usuario!.id;
+      final fotos = await ProfissionaisService.instancia.listarPortfolioFotos(meuId);
+      if (!mounted) return;
+      setState(() {
+        _fotosPortfolio = fotos;
+        _carregandoFotos = false;
+      });
+    } on ApiException {
+      if (!mounted) return;
+      setState(() => _carregandoFotos = false);
+    }
+  }
+
+  /// Escolhe uma ou mais imagens da galeria (sem recorte forçado -- ao
+  /// contrário da foto de perfil, fotos de portfólio não precisam ser
+  /// quadradas) e envia num único lote (`adicionarFotosPortfolio`). O
+  /// backend recusa (400 -- vira `ApiException`) se estourar o teto de 6 por
+  /// lote ou 24 no total.
+  Future<void> _adicionarFotosPortfolio() async {
+    final selecionadas = await ImagePicker().pickMultiImage(imageQuality: 85);
+    if (selecionadas.isEmpty || !mounted) return;
+
+    setState(() => _enviandoFotos = true);
+    try {
+      final galeria = await ProfissionaisService.instancia.adicionarFotosPortfolio(selecionadas);
+      if (!mounted) return;
+      setState(() => _fotosPortfolio = galeria);
+    } on ApiException catch (erro) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));
+      }
+    } finally {
+      if (mounted) setState(() => _enviandoFotos = false);
+    }
+  }
+
+  Future<void> _removerFotoPortfolio(FotoPortfolio foto) async {
+    setState(() => _fotosPortfolio = _fotosPortfolio.where((f) => f.idFoto != foto.idFoto).toList());
+    try {
+      final galeria = await ProfissionaisService.instancia.removerFotoPortfolio(foto.idFoto);
+      if (!mounted) return;
+      setState(() => _fotosPortfolio = galeria);
+    } on ApiException catch (erro) {
+      // Desfaz a remoção otimista se o backend recusar.
+      if (!mounted) return;
+      setState(() => _fotosPortfolio = [..._fotosPortfolio, foto]);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));
+    }
   }
 
   /// Busca o resumo de avaliações do profissional logado, para o painel de
@@ -157,6 +233,8 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
     _debounceCep?.cancel();
     _descricaoController.dispose();
     _cepController.dispose();
+    _contatoController.dispose();
+    _enderecoController.dispose();
     super.dispose();
   }
 
@@ -217,11 +295,20 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   Future<void> _salvar() async {
     final descricao = _descricaoController.text.trim();
     final cep = _cepController.text.trim();
+    final contato = _contatoController.text.trim();
+    final endereco = _enderecoController.text.trim();
 
-    if (descricao.isEmpty && cep.isEmpty && _fotoEscolhida == null) {
+    // Só manda contato/endereço se de fato mudaram -- mesmo padrão de
+    // `PerfilClienteScreen._salvar` -- evita um PATCH desnecessário quando a
+    // pessoa só veio mexer na descrição/CEP/foto.
+    final perfilAtual = _perfilCarregado;
+    final contatoMudou = contato.isNotEmpty && contato != (perfilAtual?.contato ?? '');
+    final enderecoMudou = endereco != (perfilAtual?.endereco ?? '');
+
+    if (descricao.isEmpty && cep.isEmpty && !contatoMudou && !enderecoMudou && _fotoEscolhida == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Altere a descrição, informe um CEP ou escolha uma foto antes de salvar.'),
+          content: Text('Altere algum campo ou escolha uma foto antes de salvar.'),
         ),
       );
       return;
@@ -241,10 +328,13 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
       final perfilAtualizado = await ProfissionaisService.instancia.atualizarMeuPerfil(
         descricao: descricao.isNotEmpty ? descricao : null,
         cep: cep.isNotEmpty ? cep : null,
+        contato: contatoMudou ? contato : null,
+        endereco: enderecoMudou ? endereco : null,
         foto: _fotoEscolhida,
       );
       if (!mounted) return;
       setState(() {
+        _perfilCarregado = perfilAtualizado;
         _enderecoAtualExibicao = perfilAtualizado.enderecoAtuacao;
         _cepController.clear();
         _enderecoPreview = null;
@@ -286,7 +376,7 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Editar meu perfil')),
-      body: FutureBuilder<PerfilProfissional>(
+      body: FutureBuilder<MeuPerfilProfissional>(
         future: _futuroPerfilAtual,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -414,6 +504,34 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
               ],
               const SizedBox(height: 20),
 
+              // Contato/endereço -- editáveis pela primeira vez aqui
+              // (migração 16). `contato` antes só era definido no cadastro,
+              // sem nenhum caminho de atualização; `endereco` é texto livre,
+              // complementar ao CEP acima (que só serve para geolocalizar a
+              // busca no mapa) -- mesmo espírito de
+              // `PerfilClienteScreen`/`clientes.endereco`.
+              TextField(
+                controller: _contatoController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Contato (telefone/WhatsApp)',
+                  hintText: '92988887777',
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: _enderecoController,
+                maxLines: 3,
+                maxLength: 500,
+                decoration: const InputDecoration(
+                  labelText: 'Endereço',
+                  hintText: 'Rua, número, bairro, ponto de referência...',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 20),
+
               // Especialidades -- cada box é uma tag adicionada/removida NA
               // HORA (não faz parte do "Salvar perfil" em lote abaixo, ver
               // `_adicionarTag`/`_removerTag`). Sem "categoria única" mais
@@ -429,6 +547,30 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
                       aoAdicionar: _adicionarTag,
                       aoRemover: _removerTag,
                     ),
+              const SizedBox(height: 20),
+
+              // Portfólio visual (migração 16) -- galeria de fotos que o
+              // PRÓPRIO profissional escolhe para mostrar seu trabalho,
+              // refletida no perfil público (`perfil_profissional_screen.dart`,
+              // seção "Fotos do trabalho"). Diferente do histórico de
+              // avaliações (que também aparece lá, alimentado pelos
+              // CLIENTES) -- este aqui é 100% curado pelo dono do perfil.
+              // Cada adição/remoção salva NA HORA, sem passar pelo botão
+              // "Salvar perfil" abaixo.
+              Text('Portfólio visual', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              Text(
+                'Fotos do seu trabalho, visíveis para quem visitar seu perfil.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 8),
+              _SecaoPortfolio(
+                fotos: _fotosPortfolio,
+                carregando: _carregandoFotos,
+                enviando: _enviandoFotos,
+                aoAdicionar: _adicionarFotosPortfolio,
+                aoRemover: _removerFotoPortfolio,
+              ),
               const SizedBox(height: 12),
 
               FilledButton.icon(
@@ -589,6 +731,105 @@ class _PainelDesempenho extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Grade do portfólio visual (migração 16) -- fotos já salvas + um tile de
+/// "adicionar" no fim. Cada foto tem um botão "x" no canto para remoção
+/// imediata; o tile de adicionar mostra um spinner enquanto um lote está
+/// sendo enviado (evita disparos duplicados por toques repetidos).
+///
+/// Widget "burro" de propósito, mesmo espírito de `AvatarFotoPerfil`: não
+/// sabe nada de `ImagePicker`/`ProfissionaisService`, só recebe o estado
+/// pronto e avisa a tela (`aoAdicionar`/`aoRemover`) quando alguém toca.
+class _SecaoPortfolio extends StatelessWidget {
+  final List<FotoPortfolio> fotos;
+  final bool carregando;
+  final bool enviando;
+  final VoidCallback aoAdicionar;
+  final ValueChanged<FotoPortfolio> aoRemover;
+
+  const _SecaoPortfolio({
+    required this.fotos,
+    required this.carregando,
+    required this.enviando,
+    required this.aoAdicionar,
+    required this.aoRemover,
+  });
+
+  static const _tamanhoTile = 88.0;
+
+  @override
+  Widget build(BuildContext context) {
+    if (carregando) {
+      return const SizedBox(
+        height: _tamanhoTile,
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final foto in fotos) _tileFoto(context, foto),
+        _tileAdicionar(context),
+      ],
+    );
+  }
+
+  Widget _tileFoto(BuildContext context, FotoPortfolio foto) {
+    final url = ApiConfig.urlAbsoluta(foto.urlFoto);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: url != null
+              ? Image.network(
+                  url,
+                  width: _tamanhoTile,
+                  height: _tamanhoTile,
+                  fit: BoxFit.cover,
+                )
+              : Container(
+                  width: _tamanhoTile,
+                  height: _tamanhoTile,
+                  color: Colors.grey.shade300,
+                ),
+        ),
+        Positioned(
+          top: -6,
+          right: -6,
+          child: GestureDetector(
+            onTap: () => aoRemover(foto),
+            child: CircleAvatar(
+              radius: 12,
+              backgroundColor: Colors.black87,
+              child: const Icon(Icons.close, size: 14, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tileAdicionar(BuildContext context) {
+    return InkWell(
+      onTap: enviando ? null : aoAdicionar,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: _tamanhoTile,
+        height: _tamanhoTile,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade400),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: enviando
+            ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+            : Icon(Icons.add_photo_alternate_outlined, color: Colors.grey.shade600, size: 28),
+      ),
     );
   }
 }

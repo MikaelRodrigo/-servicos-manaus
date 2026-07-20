@@ -62,6 +62,106 @@ class PerfilProfissional {
   }
 }
 
+/// Espelha GET /profissionais/me (ver `buscarMeuPerfil` no backend --
+/// `PerfilProfissional`, o mesmo nome do lado TypeScript, mas são arquivos
+/// de linguagens diferentes, sem colisão real).
+///
+/// Diferente de [PerfilProfissional] (o "cartão de visitas" PÚBLICO): esta
+/// classe é o que o PRÓPRIO profissional vê ao editar seu perfil --
+/// inclui `email`, `contato` e `endereco`, que a rota pública nunca
+/// devolve. Usada só em `editar_perfil_screen.dart`, nunca em telas de
+/// terceiros.
+class MeuPerfilProfissional {
+  final String id;
+  final String tipoPessoa;
+  final String nomeExibicao;
+  final String email;
+  final String? contato;
+  final String? endereco;
+  final String? atuacao;
+  final String? categoria;
+  final String? descricao;
+  final String? urlFotoPerfil;
+  final String? cep;
+  final String? enderecoAtuacao;
+  final double? latitude;
+  final double? longitude;
+  final List<TagSubcategoria> subcategorias;
+
+  const MeuPerfilProfissional({
+    required this.id,
+    required this.tipoPessoa,
+    required this.nomeExibicao,
+    required this.email,
+    required this.contato,
+    required this.endereco,
+    required this.atuacao,
+    required this.categoria,
+    required this.descricao,
+    required this.urlFotoPerfil,
+    required this.cep,
+    required this.enderecoAtuacao,
+    required this.latitude,
+    required this.longitude,
+    this.subcategorias = const [],
+  });
+
+  factory MeuPerfilProfissional.fromJson(Map<String, dynamic> json) {
+    final listaTags = json['subcategorias'] as List<dynamic>? ?? const [];
+    return MeuPerfilProfissional(
+      id: json['profissional_id'] as String,
+      tipoPessoa: json['tipo_pessoa'] as String,
+      nomeExibicao: json['nome_exibicao'] as String,
+      email: json['email'] as String,
+      contato: json['contato'] as String?,
+      endereco: json['endereco'] as String?,
+      atuacao: json['atuacao'] as String?,
+      categoria: json['categoria'] as String?,
+      descricao: json['descricao'] as String?,
+      urlFotoPerfil: json['url_foto_perfil'] as String?,
+      cep: json['cep'] as String?,
+      enderecoAtuacao: json['endereco_atuacao'] as String?,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      subcategorias: listaTags
+          .map((item) => TagSubcategoria.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+/// Espelha um item de GET /profissionais/:id/portfolio-fotos (tabela
+/// `portfolio_profissional`, migração 16) -- uma foto da GALERIA CURADA
+/// PELO PRÓPRIO PROFISSIONAL, sem vínculo com nenhum serviço/avaliação
+/// específico. Diferente por completo de [ItemPortfolio] (histórico
+/// alimentado pelos CLIENTES via avaliação) -- não confundir os dois na
+/// UI: esta é a seção nova "Fotos do trabalho"/"Portfólio visual".
+class FotoPortfolio {
+  final String idFoto;
+  final String urlFoto;
+  final String? legenda;
+  final int ordem;
+  final DateTime createdAt;
+
+  const FotoPortfolio({
+    required this.idFoto,
+    required this.urlFoto,
+    required this.legenda,
+    required this.ordem,
+    required this.createdAt,
+  });
+
+  factory FotoPortfolio.fromJson(Map<String, dynamic> json) {
+    return FotoPortfolio(
+      idFoto: json['id_foto'] as String,
+      urlFoto: json['url_foto'] as String,
+      legenda: json['legenda'] as String?,
+      ordem: json['ordem'] as int,
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
+
 /// Espelha GET /profissionais/:id/avaliacoes/resumo (ver `ResumoDeAvaliacoes`
 /// no backend). As médias vêm `null` quando o profissional ainda não tem
 /// nenhuma avaliação -- e é assim que a tela distingue "0 estrelas" (ruim)

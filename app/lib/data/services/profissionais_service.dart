@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import '../models/categoria.dart' show TagSubcategoria;
 import '../models/perfil_profissional.dart';
@@ -139,10 +140,23 @@ class ProfissionaisService {
     );
   }
 
+  /// GET /profissionais/me -- perfil PRIVADO do profissional logado (inclui
+  /// `email`/`contato`/`endereco`, que a rota pública nunca devolve). É a
+  /// fonte de dados de `editar_perfil_screen.dart` -- diferente de
+  /// [buscarPerfilPublico], que é o que o CLIENTE vê.
+  Future<MeuPerfilProfissional> buscarMeuPerfil() async {
+    final resposta = await _api.get('/profissionais/me');
+    return MeuPerfilProfissional.fromJson(resposta as Map<String, dynamic>);
+  }
+
   /// PATCH /profissionais/me -- o PRÓPRIO profissional logado edita seu
-  /// perfil público (descrição, CEP e/ou foto). Todos opcionais -- mas ao
-  /// menos um precisa vir, senão o backend recusa com 400 (não faz sentido
-  /// um PATCH que não muda nada).
+  /// perfil (descrição, contato, endereço, CEP e/ou foto). Todos opcionais
+  /// -- mas ao menos um precisa vir, senão o backend recusa com 400 (não
+  /// faz sentido um PATCH que não muda nada).
+  ///
+  /// `contato` (11 dígitos, DDD+número) -- editável agora pela primeira vez
+  /// (antes só era definido no cadastro). `endereco` é texto livre,
+  /// complementar ao CEP (mesmo espírito de `ClientesService`).
   ///
   /// `cep` (8 dígitos) é geocodificado NO BACKEND: o servidor define
   /// latitude/longitude e o endereço de atuação a partir dele -- o app não
@@ -155,8 +169,14 @@ class ProfissionaisService {
   /// `SeletorCategoriaCascata` reaberto na tela de edição. A tela chamando
   /// isto é responsável por só passar os dois ou nenhum (o backend recusa
   /// um par incompleto -- ver PATCH /profissionais/me).
-  Future<PerfilProfissional> atualizarMeuPerfil({
+  ///
+  /// Devolve [MeuPerfilProfissional] (perfil PRIVADO) -- não
+  /// [PerfilProfissional] -- porque `PATCH /profissionais/me` agora inclui
+  /// email/contato/endereco na resposta, igual `GET /profissionais/me`.
+  Future<MeuPerfilProfissional> atualizarMeuPerfil({
     String? descricao,
+    String? contato,
+    String? endereco,
     String? cep,
     int? categoriaId,
     int? subcategoriaId,
@@ -166,6 +186,8 @@ class ProfissionaisService {
       '/profissionais/me',
       campos: {
         if (descricao != null) 'descricao': descricao,
+        if (contato != null) 'contato': contato,
+        if (endereco != null) 'endereco': endereco,
         if (cep != null) 'cep': cep,
         if (categoriaId != null) 'categoria_id': categoriaId.toString(),
         if (subcategoriaId != null) 'subcategoria_id': subcategoriaId.toString(),
@@ -173,7 +195,59 @@ class ProfissionaisService {
       bytesArquivo: foto != null ? await foto.readAsBytes() : null,
       nomeArquivo: foto?.name,
     );
-    return PerfilProfissional.fromJson(resposta as Map<String, dynamic>);
+    return MeuPerfilProfissional.fromJson(resposta as Map<String, dynamic>);
+  }
+
+  /// GET /profissionais/:id/portfolio-fotos -- galeria curada pelo próprio
+  /// profissional (migração 16). Rota PÚBLICA (sem autenticação), usada
+  /// tanto no perfil público (o cliente vendo o profissional) quanto na
+  /// própria tela de edição (o profissional vendo/gerenciando a própria
+  /// galeria) -- ver comentário da rota no backend.
+  Future<List<FotoPortfolio>> listarPortfolioFotos(String profissionalId) async {
+    final resposta = await _api.get(
+      '/profissionais/$profissionalId/portfolio-fotos',
+      comAutenticacao: false,
+    );
+    final dados = (resposta as Map<String, dynamic>)['dados'] as List<dynamic>;
+    return dados
+        .map((item) => FotoPortfolio.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// POST /profissionais/me/portfolio-fotos -- adiciona um LOTE de fotos
+  /// (até `MAX_FOTOS_POR_LOTE_PORTFOLIO` = 6 por chamada, teto total de 24
+  /// -- o backend recusa com 400 se estourar qualquer um dos dois) à
+  /// galeria do profissional logado. Devolve a galeria ATUALIZADA inteira,
+  /// mesmo padrão de `adicionarTag`/`removerTag`.
+  Future<List<FotoPortfolio>> adicionarFotosPortfolio(List<XFile> arquivos) async {
+    final bytes = <Uint8List>[];
+    final nomes = <String>[];
+    for (final arquivo in arquivos) {
+      bytes.add(await arquivo.readAsBytes());
+      nomes.add(arquivo.name);
+    }
+    final resposta = await _api.postMultipartPortfolio(
+      '/profissionais/me/portfolio-fotos',
+      arquivos: bytes,
+      nomesArquivos: nomes,
+    ) as Map<String, dynamic>;
+    final dados = resposta['dados'] as List<dynamic>;
+    return dados
+        .map((item) => FotoPortfolio.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// DELETE /profissionais/me/portfolio-fotos/:idFoto -- remove UMA foto da
+  /// galeria do profissional logado (posse verificada no próprio SQL do
+  /// backend). Devolve a galeria ATUALIZADA.
+  Future<List<FotoPortfolio>> removerFotoPortfolio(String idFoto) async {
+    final resposta = await _api.delete(
+      '/profissionais/me/portfolio-fotos/$idFoto',
+    ) as Map<String, dynamic>;
+    final dados = resposta['dados'] as List<dynamic>;
+    return dados
+        .map((item) => FotoPortfolio.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   /// POST /profissionais/me/subcategorias -- adiciona UMA tag de
