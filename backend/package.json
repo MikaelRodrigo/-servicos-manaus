@@ -24,6 +24,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "multer-s3": "^3.0.1",
+    "pdf-parse": "^1.1.1",
     "pg": "^8.12.0"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "@types/multer": "^1.4.11",
     "@types/multer-s3": "^3.0.3",
     "@types/node": "^20.14.0",
+    "@types/pdf-parse": "^1.1.4",
     "@types/pg": "^8.11.6",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.5.0"

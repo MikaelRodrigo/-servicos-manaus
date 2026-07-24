@@ -14,9 +14,20 @@ import {
   removerFotoPortfolio,
 } from '../repositories/profissionais.repository';
 import {
+  buscarDadosParaChecagem,
+  inserirDocumento,
+  buscarUltimoDocumento,
+  buscarChaveParaDono,
+  buscarChaveParaAdmin,
+  listarPendentes,
+  aprovarDocumento,
+  rejeitarDocumento,
+} from '../repositories/documentos-antecedentes.repository';
+import {
   numeroObrigatorio,
   numeroOpcional,
   textoOpcional,
+  textoObrigatorio,
   inteiroPositivoOpcional,
   inteiroPositivoObrigatorio,
   apenasDigitos,
@@ -33,8 +44,11 @@ import {
   uploadFotosPortfolio,
   urlsPublicasDosArquivos,
   MAX_FOTOS_TOTAL_PORTFOLIO,
+  uploadDocumentoAntecedentes,
 } from '../middlewares/upload';
 import { buscarLocalizacaoPorCep } from '../services/cep';
+import { extrairTextoDoDocumento, checarDocumento } from '../services/checagem-documento';
+import { enviarDocumentoPrivado, baixarDocumentoPrivado } from '../services/uploadService';
 import { ehErroDePostgres, PG_FOREIGN_KEY_VIOLATION } from '../utils/erros-postgres';
 
 export const profissionaisRouter = Router();
@@ -551,6 +565,243 @@ profissionaisRouter.delete(
       }
       const galeria = await listarPortfolioFotos(req.usuario!.sub);
       return res.json({ dados: galeria });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
+   CERTIDÃO DE ANTECEDENTES CRIMINAIS (migração 18).
+
+   Leia o comentário no topo de `database/18_*.sql` antes de mexer aqui:
+   a aprovação é SEMPRE de um admin humano -- a checagem automática abaixo
+   só acelera a fila (e rejeita sozinha os casos ÓBVIOS), nunca aprova.
+
+   Todas as rotas "/me/*" e "/admin/*" precisam ficar registradas ANTES de
+   `/:id` mais abaixo, mesma pegadinha de sempre com o Express.
+   ========================================================================= */
+
+/**
+ * POST /profissionais/me/documento-antecedentes -- PRIVADA (exige login, só "profissional").
+ *
+ * Content-Type: multipart/form-data
+ * Campo: documento_antecedentes (1 arquivo -- PDF, JPEG, PNG ou WEBP, até
+ * `MAX_TAMANHO_DOCUMENTO_ANTECEDENTES_MB`)
+ *
+ * Cada chamada é um ENVIO NOVO (reenvio depois de rejeição inclusive) --
+ * nunca "edita" o anterior, ver `inserirDocumento`. Roda a checagem
+ * automática (extração de texto + palavra-chave/nome/CPF) e:
+ *   - se o texto foi extraído e NENHUMA palavra-chave apareceu, rejeita
+ *     SOZINHA na hora (arquivo claramente não é uma certidão);
+ *   - em qualquer outro caso (checagem OK, inconclusiva, ou não aplicável
+ *     porque é imagem/PJ), fica PENDENTE, esperando um admin.
+ *
+ * Devolve o resultado da checagem + status -- NUNCA uma URL do arquivo
+ * (ver comentário em `services/uploadService.ts` sobre por que este
+ * documento não tem link público).
+ */
+profissionaisRouter.post(
+  '/me/documento-antecedentes',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  uploadDocumentoAntecedentes,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const arquivo = req.file as Express.Multer.File | undefined;
+      if (!arquivo) {
+        throw new ErroDeValidacao('Envie o documento no campo "documento_antecedentes".');
+      }
+
+      const dadosProfissional = await buscarDadosParaChecagem(req.usuario!.sub);
+      if (!dadosProfissional) {
+        throw new ErroNaoEncontrado('Profissional não encontrado.');
+      }
+
+      const texto = await extrairTextoDoDocumento(arquivo.buffer, arquivo.mimetype);
+      const checagem = checarDocumento({
+        texto,
+        nome: dadosProfissional.nome,
+        cpf: dadosProfissional.cpf,
+      });
+
+      const { chave } = await enviarDocumentoPrivado(
+        arquivo.buffer,
+        arquivo.mimetype,
+        arquivo.originalname,
+      );
+
+      const documento = await inserirDocumento({
+        profissionalId: req.usuario!.sub,
+        chaveS3: chave,
+        tipoMime: arquivo.mimetype,
+        status: checagem.pareceDocumentoErrado ? 'REJEITADO' : 'PENDENTE',
+        palavrasChaveEncontradas: checagem.palavrasChaveEncontradas,
+        nomeEncontrado: checagem.nomeEncontrado,
+        cpfEncontrado: checagem.cpfEncontrado,
+        motivoRejeicao: checagem.pareceDocumentoErrado
+          ? 'O arquivo enviado não parece ser uma certidão de antecedentes criminais (nenhuma palavra-chave esperada foi encontrada). Confira o arquivo e envie novamente.'
+          : null,
+      });
+
+      return res.status(201).json(documento);
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * GET /profissionais/me/documento-antecedentes -- PRIVADA (exige login, só "profissional").
+ *
+ * Status do envio mais recente -- `{ status: "NAO_ENVIADO" }` (sem mais
+ * nada) se o profissional nunca enviou nada ainda.
+ */
+profissionaisRouter.get(
+  '/me/documento-antecedentes',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const documento = await buscarUltimoDocumento(req.usuario!.sub);
+      return res.json(documento ?? { status: 'NAO_ENVIADO' });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * GET /profissionais/me/documento-antecedentes/arquivo -- PRIVADA (exige
+ * login, só "profissional").
+ *
+ * Transmite os BYTES do envio mais recente do próprio profissional --
+ * nunca uma URL. É assim que o próprio dono confere o que enviou (ex.: pra
+ * conferir se subiu o arquivo certo antes de esperar a revisão).
+ */
+profissionaisRouter.get(
+  '/me/documento-antecedentes/arquivo',
+  exigirAutenticacao,
+  exigirPapel('profissional'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const referencia = await buscarChaveParaDono(req.usuario!.sub);
+      if (!referencia) {
+        throw new ErroNaoEncontrado('Você ainda não enviou nenhum documento.');
+      }
+
+      const arquivo = await baixarDocumentoPrivado(referencia.chaveS3);
+      res.setHeader('Content-Type', arquivo.contentType ?? referencia.tipoMime);
+      res.setHeader('Content-Disposition', 'inline; filename="antecedentes"');
+      arquivo.stream.on('error', next).pipe(res);
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * GET /profissionais/admin/documentos-antecedentes -- PRIVADA (exige
+ * login, só "admin").
+ *
+ * Fila de revisão: todos os documentos PENDENTES, mais antigo primeiro.
+ * Sem paginação -- a fila tende a ser pequena o bastante (revisão manual
+ * não escala para milhares de itens de qualquer forma); se um dia isso
+ * mudar, é só adicionar `pagina`/`limite` aqui, mesmo padrão do resto da API.
+ */
+profissionaisRouter.get(
+  '/admin/documentos-antecedentes',
+  exigirAutenticacao,
+  exigirPapel('admin'),
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const fila = await listarPendentes();
+      return res.json({ total: fila.length, dados: fila });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * GET /profissionais/admin/documentos-antecedentes/:id/arquivo -- PRIVADA
+ * (exige login, só "admin").
+ *
+ * Transmite os bytes de QUALQUER documento (o admin precisa ver o
+ * documento pra decidir aprovar/rejeitar) -- ainda assim nunca por URL
+ * pública, só por esta rota autenticada.
+ */
+profissionaisRouter.get(
+  '/admin/documentos-antecedentes/:id/arquivo',
+  exigirAutenticacao,
+  exigirPapel('admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = uuidObrigatorio(req.params.id, 'id');
+      const referencia = await buscarChaveParaAdmin(id);
+      if (!referencia) {
+        throw new ErroNaoEncontrado('Documento não encontrado.');
+      }
+
+      const arquivo = await baixarDocumentoPrivado(referencia.chaveS3);
+      res.setHeader('Content-Type', arquivo.contentType ?? referencia.tipoMime);
+      res.setHeader('Content-Disposition', 'inline; filename="antecedentes"');
+      arquivo.stream.on('error', next).pipe(res);
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * POST /profissionais/admin/documentos-antecedentes/:id/aprovar -- PRIVADA
+ * (exige login, só "admin").
+ *
+ * SÓ aprova se o documento ainda estiver PENDENTE (evita reaprovar/aprovar
+ * algo já rejeitado). Liga `profissionais.antecedentes_verificados` na
+ * mesma operação (ver `aprovarDocumento`) -- é isto que faz o profissional
+ * voltar a aparecer no mapa.
+ */
+profissionaisRouter.post(
+  '/admin/documentos-antecedentes/:id/aprovar',
+  exigirAutenticacao,
+  exigirPapel('admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = uuidObrigatorio(req.params.id, 'id');
+      const resultado = await aprovarDocumento(id, req.usuario!.sub);
+      if (!resultado) {
+        throw new ErroNaoEncontrado('Documento não encontrado, ou já foi revisado antes.');
+      }
+      return res.json({ aprovado: true, profissional_id: resultado.profissionalId });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/**
+ * POST /profissionais/admin/documentos-antecedentes/:id/rejeitar -- PRIVADA
+ * (exige login, só "admin").
+ *
+ * Body: { motivo: string }
+ *
+ * `motivo` é OBRIGATÓRIO (diferente de aprovar) -- o profissional precisa
+ * saber o que corrigir antes de reenviar.
+ */
+profissionaisRouter.post(
+  '/admin/documentos-antecedentes/:id/rejeitar',
+  exigirAutenticacao,
+  exigirPapel('admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = uuidObrigatorio(req.params.id, 'id');
+      const motivo = textoObrigatorio(req.body.motivo, 'motivo', { min: 3, max: 500 });
+      const rejeitou = await rejeitarDocumento(id, req.usuario!.sub, motivo);
+      if (!rejeitou) {
+        throw new ErroNaoEncontrado('Documento não encontrado, ou já foi revisado antes.');
+      }
+      return res.json({ rejeitado: true });
     } catch (erro) {
       return next(erro);
     }

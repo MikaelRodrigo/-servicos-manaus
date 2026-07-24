@@ -254,6 +254,13 @@ export async function buscarProximos(
       -- Profissional sem coordenada não entra no mapa.
       AND p.localizacao IS NOT NULL
 
+      -- Migração 18 -- só aparece no mapa quem tem a certidão de
+      -- antecedentes criminais APROVADA por um admin (nunca automático,
+      -- ver documentos-antecedentes.repository.ts). Contas criadas ANTES
+      -- da migração 18 foram marcadas TRUE por padrão (grandfathering),
+      -- então isso não some com profissionais de teste já cadastrados.
+      AND p.antecedentes_verificados = TRUE
+
       -- Filtro textual livre (legado -- mantido por compatibilidade, mas o
       -- app não digita mais texto solto: ver BuscaSubcategoriaAutocomplete,
       -- que só manda subcategoria_id exato, filtrado abaixo). Quando $4 é

@@ -1,5 +1,5 @@
 import multer from 'multer';
-import { criarStorageS3, filtroDeImagem } from '../services/uploadService';
+import { criarStorageS3, filtroDeImagem, filtroDeDocumento } from '../services/uploadService';
 import { env } from '../env';
 
 /** Teto de fotos por avaliação. Ajuste aqui se um dia precisar de mais. */
@@ -78,6 +78,36 @@ export const uploadFotosPortfolio = multer({
   fileFilter: filtroDeImagem,
 }).array('fotos_portfolio', MAX_FOTOS_POR_LOTE_PORTFOLIO);
 
+export const MAX_TAMANHO_DOCUMENTO_ANTECEDENTES_MB = 8;
+
+/**
+ * CERTIDÃO DE ANTECEDENTES CRIMINAIS (migração 18) -- ÚNICO upload do app
+ * que usa `multer.memoryStorage()` em vez de `criarStorageS3(...)`.
+ *
+ * Motivo: a rota (`POST /profissionais/me/documento-antecedentes`) precisa
+ * dos BYTES do arquivo em memória (`req.file.buffer`) para rodar a
+ * extração de texto (`pdf-parse`) e a checagem automática ANTES de decidir
+ * gravar -- diferente de `uploadFotoServico`/`uploadFotoPerfil`/
+ * `uploadFotosPortfolio`, que sobem direto pro bucket sem a rota precisar
+ * olhar o conteúdo. É a própria rota quem chama
+ * `enviarDocumentoPrivado` (uploadService.ts) depois da checagem -- ver
+ * comentário lá sobre por que o resultado é uma CHAVE, nunca uma URL
+ * pública.
+ *
+ * Limite de tamanho maior que os uploads de imagem (8 MB, não 5 MB):
+ * certidões em PDF costumam ser pequenas, mas uma foto/scan do documento
+ * pode passar de 5 MB facilmente.
+ *
+ * Espera um campo de formulário chamado EXATAMENTE "documento_antecedentes".
+ */
+export const uploadDocumentoAntecedentes = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_TAMANHO_DOCUMENTO_ANTECEDENTES_MB * 1024 * 1024,
+  },
+  fileFilter: filtroDeDocumento,
+}).single('documento_antecedentes');
+
 /**
  * multer lança sua PRÓPRIA classe de erro (`MulterError`) para problemas
  * como "arquivo grande demais" -- ela não é `ErroDeValidacao`. Este type
@@ -89,16 +119,17 @@ export function ehErroDeUpload(erro: unknown): erro is multer.MulterError {
 }
 
 // Mensagem genérica de propósito -- este mapa é COMPARTILHADO por todo
-// middleware de upload do arquivo (avaliação, perfil, portfólio), cada um
-// com seu próprio teto de quantidade (MAX_FOTOS_POR_AVALIACAO,
-// MAX_FOTOS_POR_LOTE_PORTFOLIO...). Citar um número fixo aqui seria
-// impreciso para os outros -- o `.array(...)` de cada middleware já barra
-// no teto certo; esta mensagem só precisa dizer QUE existe um limite.
+// middleware de upload do arquivo (avaliação, perfil, portfólio,
+// documento de antecedentes), cada um com seu próprio teto de tamanho/
+// quantidade (MAX_FOTOS_POR_AVALIACAO, MAX_TAMANHO_DOCUMENTO_ANTECEDENTES_MB...).
+// Citar um número fixo aqui seria impreciso para os outros -- cada
+// middleware já barra no teto certo (`limits.fileSize`/`.array(...)`);
+// esta mensagem só precisa dizer QUE existe um limite.
 const MENSAGENS_DE_ERRO_MULTER: Partial<Record<string, string>> = {
-  LIMIT_FILE_SIZE: 'A imagem excede o tamanho máximo permitido (5 MB).',
+  LIMIT_FILE_SIZE: 'O arquivo excede o tamanho máximo permitido.',
   LIMIT_UNEXPECTED_FILE: 'Campo de arquivo inesperado.',
-  LIMIT_FILE_COUNT: 'Você enviou fotos demais de uma vez.',
-  LIMIT_FIELD_COUNT: 'Você enviou fotos demais de uma vez.',
+  LIMIT_FILE_COUNT: 'Você enviou arquivos demais de uma vez.',
+  LIMIT_FIELD_COUNT: 'Você enviou arquivos demais de uma vez.',
 };
 
 export function mensagemDeErroUpload(erro: multer.MulterError): string {
