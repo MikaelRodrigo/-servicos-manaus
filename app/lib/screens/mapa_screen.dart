@@ -961,18 +961,17 @@ class _MapaScreenState extends State<MapaScreen> {
     // vez: agora a área tocável cobre o cartão do mapa inteiro.
     const alturaTotalComCartao = topoDoCartao + alturaCartaoMapa;
 
-    // Pedido explícito mais recente: trocar o "azul escuro" do cabeçalho
-    // (a versão escurecida de AppColors.destaque que existia aqui antes,
-    // via Color.lerp com preto) por "um conjunto de cor viva igual as
-    // cores do Google" -- as quatro cores clássicas da marca Google
-    // (azul/vermelho/amarelo/verde), num degradê diagonal. `AppColors.
-    // destaque` em si continua intocado (usada em botões/chips/ícones em
-    // todo o resto do app); esta paleta é local só deste cabeçalho.
+    // Pedido explícito mais recente: trocar o degradê multicor (as quatro
+    // cores da marca Google -- azul/vermelho/amarelo/verde, de uma rodada
+    // anterior) por um azul só, mais sério/institucional, que passe
+    // credibilidade -- espírito de app bancário, não "colorido". Degradê
+    // diagonal de um azul-marinho profundo até `AppColors.destaque` (o
+    // MESMO azul usado no menu inferior, ver comentário lá) -- o
+    // cabeçalho literalmente termina na cor que o menu usa, o que é o que
+    // faz os dois "combinarem" visualmente.
     const coresCabecalho = [
-      Color(0xFF4285F4), // azul
-      Color(0xFFEA4335), // vermelho
-      Color(0xFFFBBC05), // amarelo
-      Color(0xFF34A853), // verde
+      Color(0xFF0B3D73), // azul-marinho profundo
+      AppColors.destaque, // mesmo azul do menu inferior (também const)
     ];
 
     return SizedBox(

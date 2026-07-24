@@ -14,8 +14,15 @@ class AppRadius {
 class AppColors {
   AppColors._();
 
-  /// Nova cor de destaque: Azul Elétrico mais vibrante
-  static const Color destaque = Color(0xFF007AFF);
+  /// Azul "de credibilidade" -- pedido explícito: trocar o azul elétrico
+  /// (mais "tech"/vibrante) por um tom mais sério/institucional, no
+  /// espírito de app bancário/financeiro. É a MESMA cor usada no degradê
+  /// do cabeçalho do mapa (ver `coresCabecalho` em `mapa_screen.dart`, que
+  /// termina exatamente neste tom) -- por isso o menu inferior "combina"
+  /// com o cabeçalho: os dois usam esta constante (o menu via
+  /// `_botaoNavegacao` em `home_shell.dart`, que já pintava o item
+  /// selecionado com `AppColors.destaque`).
+  static const Color destaque = Color(0xFF1565C0);
 
   static const Color fundo = Color(0xFFF6F7F9);
   static const Color superficie = Colors.white;
