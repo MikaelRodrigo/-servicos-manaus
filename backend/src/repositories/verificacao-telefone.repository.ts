@@ -83,28 +83,40 @@ export async function gerarEEnviarCodigo(
     throw new ErroNaoEncontrado('Usuário não encontrado para envio do código de verificação.');
   }
 
-  const { rows: ultimoEnvio } = await pool.query<{ created_at: Date }>(
-    `SELECT created_at FROM codigos_verificacao_telefone
+  /* ---------------------------------------------------------------------
+     Tudo relativo a "agora" (throttle E expiração) é calculado DENTRO do
+     Postgres (`NOW()`, `EXTRACT(EPOCH FROM ...)`), nunca com `Date.now()`
+     do Node -- de propósito. O backend costuma rodar numa máquina
+     diferente de onde o Postgres mora (aqui, localhost vs. Neon na
+     nuvem); se o relógio do sistema local estiver dessincronizado (fuso
+     errado, relógio atrasado/adiantado), comparar um `Date.now()` local
+     contra um `NOW()` do banco pode gerar um código que já nasce
+     "expirado" mesmo tendo acabado de ser criado -- foi exatamente esse
+     bug que apareceu em teste (código confirmado segundos depois de
+     gerado, e mesmo assim "expirado ou inexistente"). Fazendo a conta
+     TODA dentro do Postgres, os dois lados da comparação usam sempre o
+     MESMO relógio.
+     --------------------------------------------------------------------- */
+  const { rows: ultimoEnvio } = await pool.query<{ segundos_desde: number }>(
+    `SELECT EXTRACT(EPOCH FROM (NOW() - created_at))::float8 AS segundos_desde
+       FROM codigos_verificacao_telefone
       WHERE papel = $1 AND usuario_id = $2
       ORDER BY created_at DESC
       LIMIT 1`,
     [papel, usuarioId],
   );
-  if (ultimoEnvio[0]) {
-    const segundosDesdeUltimoEnvio = (Date.now() - new Date(ultimoEnvio[0].created_at).getTime()) / 1000;
-    if (segundosDesdeUltimoEnvio < SEGUNDOS_ENTRE_ENVIOS) {
-      const faltam = Math.ceil(SEGUNDOS_ENTRE_ENVIOS - segundosDesdeUltimoEnvio);
-      throw new ErroDeValidacao(`Aguarde ${faltam} segundo(s) antes de pedir um novo código.`);
-    }
+  const segundosDesdeUltimoEnvio = ultimoEnvio[0]?.segundos_desde;
+  if (segundosDesdeUltimoEnvio !== undefined && segundosDesdeUltimoEnvio < SEGUNDOS_ENTRE_ENVIOS) {
+    const faltam = Math.ceil(SEGUNDOS_ENTRE_ENVIOS - segundosDesdeUltimoEnvio);
+    throw new ErroDeValidacao(`Aguarde ${faltam} segundo(s) antes de pedir um novo código.`);
   }
 
   const codigo = gerarCodigoDeVerificacao();
-  const expiraEm = new Date(Date.now() + MINUTOS_VALIDADE_CODIGO * 60 * 1000);
 
   await pool.query(
     `INSERT INTO codigos_verificacao_telefone (papel, usuario_id, codigo_hash, expira_em)
-     VALUES ($1, $2, $3, $4)`,
-    [papel, usuarioId, hashCodigo(codigo), expiraEm],
+     VALUES ($1, $2, $3, NOW() + ($4 * INTERVAL '1 minute'))`,
+    [papel, usuarioId, hashCodigo(codigo), MINUTOS_VALIDADE_CODIGO],
   );
 
   return enviarCodigoPorSms(contato, codigo);
