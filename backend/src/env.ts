@@ -87,6 +87,26 @@ export const env = {
     webhookSecret: process.env.PIX_PROPRIO_WEBHOOK_SECRET,
   },
 
+  // Provedor de SMS (migração 17 -- verificação de telefone no cadastro).
+  // MESMO ESPÍRITO de `pixProprio` acima: nenhuma chave aqui é
+  // `obrigatoria(...)`. Enquanto `baseUrl` não estiver definida,
+  // `services/sms.ts` roda em MODO SIMULADO (gera o código de 6 dígitos
+  // normalmente, mas em vez de mandar pra operadora de verdade, só loga no
+  // console do servidor e devolve o código na própria resposta da API --
+  // ver `verificacao: { simulado: true, codigo: "..." }` em
+  // `POST /auth/cadastro/*` e `POST /auth/verificar-telefone/*`) -- é o
+  // que permite testar o fluxo inteiro (cadastro -> código -> confirmação
+  // -> login) sem nenhuma conta de SMS de verdade. Configure as três
+  // variáveis quando escolher um provedor (Twilio, Zenvia, AWS SNS...).
+  sms: {
+    baseUrl: process.env.SMS_PROVIDER_BASE_URL,
+    apiKey: process.env.SMS_PROVIDER_API_KEY,
+    // Remetente exibido no SMS (nome curto ou número, depende do provedor)
+    // -- opcional mesmo em modo real: alguns provedores definem isso na
+    // própria conta, não por requisição.
+    remetente: process.env.SMS_PROVIDER_REMETENTE,
+  },
+
   // Percentual retido pela plataforma sobre cada serviço (pedido do
   // usuário: "8,9%", o número mais recente e específico -- a mensagem
   // inicial dizia "8%"; ver o comentário em `database/15_*.sql`, Seção 4).

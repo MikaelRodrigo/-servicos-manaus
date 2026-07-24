@@ -38,6 +38,28 @@ export class ErroNaoEncontrado extends Error {
   }
 }
 
+/**
+ * Login recusado porque o telefone ainda não foi confirmado (migração 17).
+ * HTTP 403 (o e-mail/senha estão CORRETOS -- diferente de credenciais
+ * inválidas -- só falta um passo antes de entrar). Carrega `papel` e
+ * `usuarioId` para o app conseguir abrir a tela de confirmação de código
+ * direto, sem precisar perguntar de novo quem é a pessoa -- ver o campo
+ * extra `motivo`/`papel`/`usuario_id` que o middleware de erro (app.ts)
+ * inclui na resposta JSON além da mensagem.
+ */
+export class ErroTelefoneNaoVerificado extends Error {
+  public readonly status = 403;
+  public readonly papel: 'cliente' | 'profissional';
+  public readonly usuarioId: string;
+
+  constructor(papel: 'cliente' | 'profissional', usuarioId: string) {
+    super('Confirme seu telefone antes de entrar. Reenviamos um código por SMS.');
+    this.name = 'ErroTelefoneNaoVerificado';
+    this.papel = papel;
+    this.usuarioId = usuarioId;
+  }
+}
+
 /* ============================================================================
    Por que não `Number(req.query.latitude)` direto?
 

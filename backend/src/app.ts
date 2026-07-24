@@ -9,10 +9,16 @@ import { curtidasRouter } from './routes/curtidas.routes';
 import { categoriasRouter } from './routes/categorias.routes';
 import { cepRouter } from './routes/cep.routes';
 import { pagamentosRouter } from './routes/pagamentos.routes';
-import { ErroDeValidacao, ErroDeConflito, ErroNaoEncontrado } from './utils/validacao';
+import {
+  ErroDeValidacao,
+  ErroDeConflito,
+  ErroNaoEncontrado,
+  ErroTelefoneNaoVerificado,
+} from './utils/validacao';
 import { ErroDeAutenticacao } from './middlewares/autenticacao';
 import { ehErroDeUpload, mensagemDeErroUpload } from './middlewares/upload';
 import { ErroDePixProprio } from './services/pix-proprio';
+import { ErroDeSms } from './services/sms';
 
 export const app = express();
 
@@ -107,6 +113,19 @@ app.use((erro: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return res.status(404).json({ erro: erro.message });
   }
 
+  // Login com e-mail/senha corretos, mas telefone ainda não confirmado
+  // (migração 17) -> 403, com campos extras para o app abrir a tela de
+  // confirmação de código direto (sem esses campos, ele só saberia mostrar
+  // a mensagem genérica de erro).
+  if (erro instanceof ErroTelefoneNaoVerificado) {
+    return res.status(403).json({
+      erro: erro.message,
+      motivo: 'TELEFONE_NAO_VERIFICADO',
+      papel: erro.papel,
+      usuario_id: erro.usuarioId,
+    });
+  }
+
   // Erro do multer (arquivo grande demais, campo errado etc.) -> 400.
   if (ehErroDeUpload(erro)) {
     return res.status(400).json({ erro: mensagemDeErroUpload(erro) });
@@ -119,6 +138,14 @@ app.use((erro: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (erro instanceof ErroDePixProprio) {
     console.error('[erro] API Pix própria:', erro.message);
     return res.status(502).json({ erro: 'Não foi possível completar a operação de pagamento agora.' });
+  }
+
+  // Provedor de SMS recusou/falhou/está fora do ar, ou a integração real
+  // ainda não foi implementada (ver services/sms.ts) -> 502, mesmo
+  // tratamento do Pix próprio acima.
+  if (erro instanceof ErroDeSms) {
+    console.error('[erro] Provedor de SMS:', erro.message);
+    return res.status(502).json({ erro: 'Não foi possível enviar o SMS de verificação agora.' });
   }
 
   // Qualquer outra coisa é bug NOSSO. Loga completo no servidor...

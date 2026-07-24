@@ -24,6 +24,10 @@ export interface UsuarioAutenticavel {
    * tela inicial do app já mostre a foto assim que a pessoa loga, sem
    * precisar de uma chamada extra à API. */
   url_foto_perfil: string | null;
+  /** 11 dígitos (DDD+número) -- `null` só para admin (tabela `admins` não tem essa coluna, ver `buscarAdminPorEmail`). Usado pela rota de login (auth.routes.ts) para reenviar um código SMS fresco quando `telefone_verificado` for `false`. */
+  contato: string | null;
+  /** Migração 17 -- `false` bloqueia POST /auth/login com `ErroTelefoneNaoVerificado` (ver auth.routes.ts). Sempre `true` para admin (não existe verificação de telefone para esse papel). */
+  telefone_verificado: boolean;
 }
 
 /**
@@ -41,7 +45,7 @@ export { PG_UNIQUE_VIOLATION } from '../utils/erros-postgres';
 export async function buscarClientePorEmail(email: string): Promise<UsuarioAutenticavel | null> {
   const { rows } = await pool.query<UsuarioAutenticavel>(
     `SELECT cliente_id AS id, email, senha_hash, COALESCE(nome, razao_social) AS nome_exibicao,
-            url_foto_perfil
+            url_foto_perfil, contato, telefone_verificado
        FROM clientes
       WHERE email = $1`,
     [email],
@@ -54,7 +58,7 @@ export async function buscarProfissionalPorEmail(
 ): Promise<UsuarioAutenticavel | null> {
   const { rows } = await pool.query<UsuarioAutenticavel>(
     `SELECT profissional_id AS id, email, senha_hash, COALESCE(nome, razao_social) AS nome_exibicao,
-            url_foto_perfil
+            url_foto_perfil, contato, telefone_verificado
        FROM profissionais
       WHERE email = $1`,
     [email],
@@ -72,7 +76,11 @@ export async function buscarProfissionalPorEmail(
  * `url_foto_perfil` (não precisa de foto de perfil), por isso sempre `null`
  * aqui -- mantém o formato `UsuarioAutenticavel` idêntico ao de
  * cliente/profissional, para `POST /auth/login` reaproveitar exatamente a
- * mesma lógica de verificação de senha e geração de token.
+ * mesma lógica de verificação de senha e geração de token. Pela mesma
+ * razão, `contato: null` e `telefone_verificado: true` são fixos aqui
+ * (migração 17 -- `admins` não tem coluna `contato`, e a verificação de
+ * telefone não se aplica a esse papel; ver a checagem `papel !== 'admin'`
+ * em `POST /auth/login`).
  */
 export async function buscarAdminPorEmail(email: string): Promise<UsuarioAutenticavel | null> {
   const { rows } = await pool.query<{ id: string; email: string; senha_hash: string; nome_exibicao: string }>(
@@ -82,7 +90,7 @@ export async function buscarAdminPorEmail(email: string): Promise<UsuarioAutenti
     [email],
   );
   if (!rows[0]) return null;
-  return { ...rows[0], url_foto_perfil: null };
+  return { ...rows[0], url_foto_perfil: null, contato: null, telefone_verificado: true };
 }
 
 // ---------------------------------------------------------------------------

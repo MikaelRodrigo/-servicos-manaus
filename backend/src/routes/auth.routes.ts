@@ -9,8 +9,10 @@ import {
   numeroDoBody,
   inteiroPositivoObrigatorio,
   entre,
+  uuidObrigatorio,
   ErroDeValidacao,
   ErroDeConflito,
+  ErroTelefoneNaoVerificado,
 } from '../utils/validacao';
 import { gerarHashSenha, conferirSenha } from '../utils/senha';
 import { gerarToken, Papel } from '../utils/jwt';
@@ -29,6 +31,11 @@ import {
   criarProfissionalPF,
   criarProfissionalPJ,
 } from '../repositories/auth.repository';
+import {
+  gerarEEnviarCodigo,
+  confirmarCodigo,
+  PapelVerificavel,
+} from '../repositories/verificacao-telefone.repository';
 
 export const authRouter = Router();
 
@@ -97,7 +104,20 @@ authRouter.post(
               ...coordenadas,
             });
 
-      return res.status(201).json({ cliente_id: criado.id, tipo_pessoa: tipoPessoa, email });
+      // Dispara o primeiro código de verificação (migração 17) já aqui --
+      // a conta acabou de nascer com `telefone_verificado = false`, e o
+      // app abre a tela de confirmação em seguida. `verificacao.codigo` só
+      // vem preenchido em MODO SIMULADO (ver services/sms.ts); em modo
+      // real, o campo não existe na resposta -- o código só chega por SMS
+      // mesmo.
+      const verificacao = await gerarEEnviarCodigo('cliente', criado.id);
+
+      return res.status(201).json({
+        cliente_id: criado.id,
+        tipo_pessoa: tipoPessoa,
+        email,
+        verificacao,
+      });
     } catch (erro) {
       if (ehErroDePostgres(erro) && erro.code === PG_UNIQUE_VIOLATION) {
         return next(new ErroDeConflito('Já existe um cliente cadastrado com este e-mail/CPF/CNPJ.'));
@@ -168,9 +188,15 @@ authRouter.post(
               ...coordenadas,
             });
 
-      return res
-        .status(201)
-        .json({ profissional_id: criado.id, tipo_pessoa: tipoPessoa, email });
+      // Mesma ideia do cadastro de cliente acima -- ver comentário lá.
+      const verificacao = await gerarEEnviarCodigo('profissional', criado.id);
+
+      return res.status(201).json({
+        profissional_id: criado.id,
+        tipo_pessoa: tipoPessoa,
+        email,
+        verificacao,
+      });
     } catch (erro) {
       if (ehErroDePostgres(erro) && erro.code === PG_UNIQUE_VIOLATION) {
         return next(
@@ -240,6 +266,19 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
       throw new ErroDeValidacao(CREDENCIAIS_INVALIDAS);
     }
 
+    // Migração 17 -- e-mail/senha corretos, mas o telefone ainda não foi
+    // confirmado. `admin` fica de fora (sempre `telefone_verificado: true`,
+    // ver `buscarAdminPorEmail`) -- a checagem abaixo nunca dispara para
+    // esse papel, mas o `if` some deixado explícito para o TypeScript
+    // estreitar `papel` para `PapelVerificavel` ('cliente' | 'profissional').
+    if (papel !== 'admin' && !usuario.telefone_verificado) {
+      // Reenvia um código fresco na hora -- garante que a pessoa sempre
+      // tem um código válido pronto pra usar, mesmo que o do cadastro já
+      // tenha expirado (10 minutos) ou nunca tenha chegado.
+      await gerarEEnviarCodigo(papel, usuario.id);
+      throw new ErroTelefoneNaoVerificado(papel, usuario.id);
+    }
+
     const token = gerarToken({ sub: usuario.id, papel: papel as Papel, email: usuario.email });
 
     return res.json({
@@ -256,6 +295,66 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     return next(erro);
   }
 });
+
+/** Lê e valida `papel` restrito a 'cliente' | 'profissional' -- as duas rotas de verificação abaixo nunca lidam com admin (ver comentário em ErroTelefoneNaoVerificado). */
+function papelVerificavelObrigatorio(valor: unknown): PapelVerificavel {
+  if (valor !== 'cliente' && valor !== 'profissional') {
+    throw new ErroDeValidacao(`O campo "papel" deve ser "cliente" ou "profissional". Recebido: ${valor}.`);
+  }
+  return valor;
+}
+
+/* ============================================================================
+   POST /auth/verificar-telefone/reenviar
+
+   Body: { papel: "cliente" | "profissional", usuario_id: uuid }
+
+   Gera e envia um código NOVO -- usado quando o código do cadastro expirou
+   (10 minutos) ou nunca chegou. Sujeito ao intervalo mínimo entre envios
+   (ver SEGUNDOS_ENTRE_ENVIOS em verificacao-telefone.repository.ts).
+   ========================================================================= */
+authRouter.post(
+  '/verificar-telefone/reenviar',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const papel = papelVerificavelObrigatorio(body.papel);
+      const usuarioId = uuidObrigatorio(body.usuario_id, 'usuario_id');
+
+      const verificacao = await gerarEEnviarCodigo(papel, usuarioId);
+      return res.json({ verificacao });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
+
+/* ============================================================================
+   POST /auth/verificar-telefone/confirmar
+
+   Body: { papel: "cliente" | "profissional", usuario_id: uuid, codigo: "123456" }
+
+   Sem autenticação de propósito -- a pessoa ainda não tem token nesse
+   momento (o cadastro não faz login automático mais, ver
+   `POST /auth/login` acima). A "prova de posse" aqui é o próprio código,
+   que só chegou no telefone dela.
+   ========================================================================= */
+authRouter.post(
+  '/verificar-telefone/confirmar',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const papel = papelVerificavelObrigatorio(body.papel);
+      const usuarioId = uuidObrigatorio(body.usuario_id, 'usuario_id');
+      const codigo = apenasDigitos(body.codigo, 'codigo', 6);
+
+      await confirmarCodigo(papel, usuarioId, codigo);
+      return res.json({ verificado: true });
+    } catch (erro) {
+      return next(erro);
+    }
+  },
+);
 
 /* ============================================================================
    GET /auth/me  -- rota protegida de exemplo.
