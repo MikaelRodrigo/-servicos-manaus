@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../data/models/categoria.dart';
 import '../data/models/usuario.dart';
 import '../data/services/api_client.dart';
 import '../data/services/auth_service.dart';
 import '../data/services/categorias_service.dart';
-import '../providers/auth_provider.dart';
 import '../widgets/seletor_categoria_cascata.dart';
+import 'verificar_telefone_screen.dart';
 
 class CadastroScreen extends StatefulWidget {
   const CadastroScreen({super.key});
@@ -170,28 +169,28 @@ class _CadastroScreenState extends State<CadastroScreen> {
         corpo['cnpj'] = _apenasDigitos(_cnpj.text);
       }
 
-      if (_tipoConta == Papel.cliente) {
-        await AuthService.instancia.cadastrarCliente(corpo);
-      } else {
-        await AuthService.instancia.cadastrarProfissional(corpo);
-      }
+      final resultado = _tipoConta == Papel.cliente
+          ? await AuthService.instancia.cadastrarCliente(corpo)
+          : await AuthService.instancia.cadastrarProfissional(corpo);
 
       if (!mounted) return;
 
-      // UX: depois de cadastrar, já loga a pessoa direto -- ninguém gosta
-      // de preencher formulário e ainda ter que digitar e-mail/senha de
-      // novo na sequência.
-      final logado = await context.read<AuthProvider>().login(
+      // Migração 17: a conta nasce com telefone NÃO verificado -- o
+      // cadastro já disparou o primeiro código SMS (`resultado.verificacao`),
+      // mas ainda falta confirmar antes de logar. Diferente do fluxo
+      // antigo (login automático direto daqui), agora é
+      // `VerificarTelefoneScreen` quem faz o login, depois de confirmado.
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VerificarTelefoneScreen(
             papel: _tipoConta,
+            usuarioId: resultado.id,
             email: _email.text.trim(),
             senha: _senha.text,
-          );
-
-      if (logado && mounted) {
-        // Fecha esta tela. O widget raiz (main.dart) já vai estar
-        // mostrando o mapa por trás, porque ele reage ao AuthProvider.
-        Navigator.of(context).pop();
-      }
+            verificacaoInicial: resultado.verificacao,
+          ),
+        ),
+      );
     } on ApiException catch (erro) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));

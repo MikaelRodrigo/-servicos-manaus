@@ -36,8 +36,13 @@ MediaType? _tipoDeConteudoPorExtensao(String? nomeArquivo) {
 class ApiException implements Exception {
   final int statusCode;
   final String mensagem;
+  /// Corpo JSON completo do erro (quando é um Map) -- além de "erro", o
+  /// backend às vezes manda campos extras (ex.: `motivo`/`papel`/
+  /// `usuario_id` em `ErroTelefoneNaoVerificado`, ver auth.routes.ts/
+  /// app.ts). `null` quando o corpo não é um Map (ou não veio nenhum).
+  final Map<String, dynamic>? corpo;
 
-  ApiException(this.statusCode, this.mensagem);
+  ApiException(this.statusCode, this.mensagem, {this.corpo});
 
   @override
   String toString() => mensagem;
@@ -229,6 +234,10 @@ class ApiClient {
         ? corpo['erro'] as String
         : 'Erro inesperado (código ${resposta.statusCode}).';
 
-    throw ApiException(resposta.statusCode, mensagem);
+    throw ApiException(
+      resposta.statusCode,
+      mensagem,
+      corpo: corpo is Map<String, dynamic> ? corpo : null,
+    );
   }
 }

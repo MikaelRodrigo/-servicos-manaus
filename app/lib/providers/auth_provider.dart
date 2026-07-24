@@ -23,11 +23,22 @@ class AuthProvider extends ChangeNotifier {
   String? _erro;
   bool _enviando = false;
 
+  // Preenchidos só quando `login` falha com 403 "TELEFONE_NAO_VERIFICADO"
+  // (migração 17 -- ver `ErroTelefoneNaoVerificado` no backend). É o que
+  // permite `LoginScreen` abrir a tela de confirmação de código direto,
+  // sem precisar perguntar de novo quem é a pessoa -- o backend já reenvia
+  // um código fresco nesse momento, então a tela nem precisa pedir isso.
+  String? _usuarioIdParaVerificacao;
+
   StatusAuth get status => _status;
   Usuario? get usuario => _usuario;
   String? get erro => _erro;
   bool get enviando => _enviando;
   bool get autenticado => _status == StatusAuth.autenticado;
+  /// `null` a menos que o último `login()` tenha falhado especificamente
+  /// por telefone não verificado -- nesse caso, o id a passar para a tela
+  /// de confirmação de código.
+  String? get usuarioIdParaVerificacao => _usuarioIdParaVerificacao;
 
   AuthProvider() {
     _restaurarSessao();
@@ -59,6 +70,7 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     _enviando = true;
     _erro = null;
+    _usuarioIdParaVerificacao = null;
     notifyListeners();
 
     try {
@@ -72,6 +84,9 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } on ApiException catch (erro) {
       _erro = erro.mensagem;
+      if (erro.statusCode == 403 && erro.corpo?['motivo'] == 'TELEFONE_NAO_VERIFICADO') {
+        _usuarioIdParaVerificacao = erro.corpo!['usuario_id'] as String;
+      }
       return false;
     } finally {
       _enviando = false;

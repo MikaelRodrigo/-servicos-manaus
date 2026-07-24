@@ -4,6 +4,7 @@ import '../data/models/usuario.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/logo_app.dart';
 import 'cadastro_screen.dart';
+import 'verificar_telefone_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,18 +34,40 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    final sucesso = await context.read<AuthProvider>().login(
-          papel: _papel,
-          email: _emailController.text.trim(),
-          senha: _senhaController.text,
-        );
+    final authProvider = context.read<AuthProvider>();
+    final sucesso = await authProvider.login(
+      papel: _papel,
+      email: _emailController.text.trim(),
+      senha: _senhaController.text,
+    );
 
     // Não precisamos navegar manualmente para a próxima tela: main.dart
     // observa AuthProvider.status e troca de tela sozinho quando o login
     // muda o status para `autenticado`. Isso evita "esquecer" de navegar
     // em algum outro lugar que também chame login().
     if (!sucesso && mounted) {
-      final erro = context.read<AuthProvider>().erro;
+      // Migração 17: e-mail/senha corretos, só falta confirmar o telefone
+      // (erro 403 "TELEFONE_NAO_VERIFICADO" -- ver `AuthProvider.login`,
+      // que já guarda o `usuario_id` em `usuarioIdParaVerificacao` nesse
+      // caso específico). O backend já reenviou um código fresco no
+      // instante em que recusou o login -- a tela de verificação só
+      // precisa abrir e deixar a pessoa digitar.
+      final usuarioId = authProvider.usuarioIdParaVerificacao;
+      if (usuarioId != null) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VerificarTelefoneScreen(
+              papel: _papel,
+              usuarioId: usuarioId,
+              email: _emailController.text.trim(),
+              senha: _senhaController.text,
+            ),
+          ),
+        );
+        return;
+      }
+
+      final erro = authProvider.erro;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(erro ?? 'Não foi possível entrar.')),
       );
