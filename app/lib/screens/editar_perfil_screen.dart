@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../core/config/api_config.dart';
 import '../data/models/categoria.dart';
+import '../data/models/documento_antecedentes.dart';
 import '../data/models/endereco_cep.dart';
 import '../data/models/perfil_profissional.dart';
 import '../data/services/api_client.dart';
@@ -94,6 +96,16 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
   bool _carregandoFotos = true;
   bool _enviandoFotos = false;
 
+  // Certidão de antecedentes criminais (migração 18) -- "campo reservado"
+  // pedido explicitamente: o profissional envia o documento aqui, um admin
+  // aprova/rejeita depois (nunca automático, ver comentário no backend).
+  // Enquanto não for APROVADO, o profissional some da busca por
+  // proximidade do mapa (mas continua podendo logar/editar o resto do
+  // perfil normalmente -- diferente do bloqueio de telefone).
+  DocumentoAntecedentes? _documentoAntecedentes;
+  bool _carregandoDocumento = true;
+  bool _enviandoDocumento = false;
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +125,59 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
     _carregarCategorias();
     _carregarResumoDesempenho();
     _carregarFotosPortfolio();
+    _carregarDocumentoAntecedentes();
+  }
+
+  Future<void> _carregarDocumentoAntecedentes() async {
+    try {
+      final documento = await ProfissionaisService.instancia.buscarStatusDocumentoAntecedentes();
+      if (!mounted) return;
+      setState(() {
+        _documentoAntecedentes = documento;
+        _carregandoDocumento = false;
+      });
+    } on ApiException {
+      if (!mounted) return;
+      setState(() => _carregandoDocumento = false);
+    }
+  }
+
+  /// Escolhe UM arquivo (PDF ou imagem) e envia na hora -- mesmo espírito
+  /// das tags/fotos de portfólio acima: não faz parte do "Salvar perfil"
+  /// em lote, é um envio próprio, com seu próprio ciclo de aprovação.
+  Future<void> _enviarDocumentoAntecedentes() async {
+    final resultado = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
+      withData: true, // bytes direto em PlatformFile.bytes -- sem dart:io File, funciona no Web também.
+    );
+    final arquivo = resultado?.files.single;
+    if (arquivo == null || arquivo.bytes == null || !mounted) return;
+
+    setState(() => _enviandoDocumento = true);
+    try {
+      final documento = await ProfissionaisService.instancia.enviarDocumentoAntecedentes(
+        bytes: arquivo.bytes!,
+        nomeArquivo: arquivo.name,
+      );
+      if (!mounted) return;
+      setState(() => _documentoAntecedentes = documento);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            documento.status == StatusDocumentoAntecedentes.rejeitado
+                ? (documento.motivoRejeicao ?? 'Documento recusado. Confira o arquivo e envie novamente.')
+                : 'Documento enviado! Assim que for aprovado, você aparece nas buscas do mapa.',
+          ),
+        ),
+      );
+    } on ApiException catch (erro) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(erro.mensagem)));
+      }
+    } finally {
+      if (mounted) setState(() => _enviandoDocumento = false);
+    }
   }
 
   /// Busca a galeria já salva do profissional logado. Mesma rota pública
@@ -532,6 +597,19 @@ class _EditarPerfilScreenState extends State<EditarPerfilScreen> {
               ),
               const SizedBox(height: 20),
 
+              // Certidão de antecedentes criminais (migração 18) -- "campo
+              // reservado" pedido explicitamente. Enquanto não aprovada, o
+              // profissional some da busca do mapa (ver comentário em
+              // _documentoAntecedentes acima) -- mas continua vendo/editando
+              // o resto do perfil normalmente.
+              _SecaoDocumentoAntecedentes(
+                documento: _documentoAntecedentes,
+                carregando: _carregandoDocumento,
+                enviando: _enviandoDocumento,
+                aoEnviar: _enviarDocumentoAntecedentes,
+              ),
+              const SizedBox(height: 20),
+
               // Especialidades -- cada box é uma tag adicionada/removida NA
               // HORA (não faz parte do "Salvar perfil" em lote abaixo, ver
               // `_adicionarTag`/`_removerTag`). Sem "categoria única" mais
@@ -729,6 +807,139 @@ class _PainelDesempenho extends StatelessWidget {
               valor: dados.mediaEconomico,
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Certidão de antecedentes criminais (migração 18) -- status atual +
+/// botão de envio. Widget "burro" de propósito, mesmo espírito de
+/// `_SecaoPortfolio`: só mostra o estado já pronto, não sabe nada de
+/// `FilePicker`/`ProfissionaisService`.
+///
+/// IMPORTANTE (mesmo aviso do backend): a checagem automática por trás
+/// disto (palavras-chave, nome/CPF) NÃO confirma autenticidade jurídica --
+/// só acelera a fila do admin, que sempre revisa manualmente antes de
+/// aprovar de verdade. "Rejeitado" pode significar tanto "documento errado"
+/// quanto "a checagem automática recusou na hora" (ver `motivoRejeicao`).
+class _SecaoDocumentoAntecedentes extends StatelessWidget {
+  final DocumentoAntecedentes? documento;
+  final bool carregando;
+  final bool enviando;
+  final VoidCallback aoEnviar;
+
+  const _SecaoDocumentoAntecedentes({
+    required this.documento,
+    required this.carregando,
+    required this.enviando,
+    required this.aoEnviar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.gavel_outlined, size: 20, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Certidão de antecedentes criminais',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Precisamos confirmar seus antecedentes para você aparecer nas buscas dos clientes no mapa.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            if (carregando)
+              const Center(child: CircularProgressIndicator(strokeWidth: 2))
+            else
+              _statusAtual(context),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: enviando ? null : aoEnviar,
+              icon: enviando
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_file_outlined),
+              label: Text(_rotuloBotao),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String get _rotuloBotao {
+    final status = documento?.status;
+    if (status == null || status == StatusDocumentoAntecedentes.naoEnviado) {
+      return 'Enviar documento';
+    }
+    return 'Enviar outro documento';
+  }
+
+  Widget _statusAtual(BuildContext context) {
+    final doc = documento;
+    switch (doc?.status) {
+      case null:
+      case StatusDocumentoAntecedentes.naoEnviado:
+        return _linhaStatus(
+          context,
+          icone: Icons.info_outline,
+          cor: Colors.grey.shade600,
+          texto: 'Nenhum documento enviado ainda.',
+        );
+      case StatusDocumentoAntecedentes.pendente:
+        return _linhaStatus(
+          context,
+          icone: Icons.hourglass_top_outlined,
+          cor: Colors.orange.shade800,
+          texto: 'Em análise -- aguardando revisão.',
+        );
+      case StatusDocumentoAntecedentes.aprovado:
+        return _linhaStatus(
+          context,
+          icone: Icons.check_circle_outline,
+          cor: Colors.green.shade700,
+          texto: 'Aprovado -- você já aparece nas buscas do mapa.',
+        );
+      case StatusDocumentoAntecedentes.rejeitado:
+        return _linhaStatus(
+          context,
+          icone: Icons.error_outline,
+          cor: Theme.of(context).colorScheme.error,
+          texto: 'Rejeitado: ${doc?.motivoRejeicao ?? "confira o arquivo e envie novamente."}',
+        );
+    }
+  }
+
+  Widget _linhaStatus(
+    BuildContext context, {
+    required IconData icone,
+    required Color cor,
+    required String texto,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icone, size: 18, color: cor),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(texto, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cor)),
         ),
       ],
     );

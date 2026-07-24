@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import '../models/categoria.dart' show TagSubcategoria;
+import '../models/documento_antecedentes.dart';
 import '../models/perfil_profissional.dart';
 import '../models/profissional.dart';
 import 'api_client.dart';
@@ -235,6 +236,33 @@ class ProfissionaisService {
     return dados
         .map((item) => FotoPortfolio.fromJson(item as Map<String, dynamic>))
         .toList();
+  }
+
+  /// GET /profissionais/me/documento-antecedentes -- status do envio mais
+  /// recente da certidão de antecedentes criminais (migração 18). NUNCA
+  /// devolve o arquivo em si (documento sensível, sem URL -- ver
+  /// comentário no backend, services/uploadService.ts).
+  Future<DocumentoAntecedentes> buscarStatusDocumentoAntecedentes() async {
+    final resposta = await _api.get('/profissionais/me/documento-antecedentes');
+    return DocumentoAntecedentes.fromJson(resposta as Map<String, dynamic>);
+  }
+
+  /// POST /profissionais/me/documento-antecedentes -- envia (ou reenvia,
+  /// depois de uma rejeição) a certidão. `bytes`/`nomeArquivo` vêm de
+  /// `FilePicker` (PDF ou imagem -- ver editar_perfil_screen.dart). O
+  /// backend roda uma checagem automática básica na hora (palavras-chave,
+  /// nome/CPF) e já devolve o resultado -- a aprovação final continua
+  /// sendo sempre manual, de um admin.
+  Future<DocumentoAntecedentes> enviarDocumentoAntecedentes({
+    required Uint8List bytes,
+    required String nomeArquivo,
+  }) async {
+    final resposta = await _api.postMultipartDocumento(
+      '/profissionais/me/documento-antecedentes',
+      bytes: bytes,
+      nomeArquivo: nomeArquivo,
+    );
+    return DocumentoAntecedentes.fromJson(resposta as Map<String, dynamic>);
   }
 
   /// DELETE /profissionais/me/portfolio-fotos/:idFoto -- remove UMA foto da

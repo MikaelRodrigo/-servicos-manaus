@@ -25,6 +25,8 @@ MediaType? _tipoDeConteudoPorExtensao(String? nomeArquivo) {
       return MediaType('image', 'png');
     case 'webp':
       return MediaType('image', 'webp');
+    case 'pdf':
+      return MediaType('application', 'pdf');
     default:
       return null; // extensão desconhecida -- deixa o backend recusar com mensagem clara.
   }
@@ -196,6 +198,25 @@ class ApiClient {
       nomeCampoArquivo: 'fotos_portfolio',
       arquivos: arquivos,
       nomesArquivos: nomesArquivos,
+    );
+  }
+
+  /// POST multipart, UM arquivo só -- usado para enviar a certidão de
+  /// antecedentes criminais (POST /profissionais/me/documento-antecedentes,
+  /// campo "documento_antecedentes", migração 18). PDF ou imagem -- ver
+  /// `_tipoDeConteudoPorExtensao` acima, que agora também reconhece ".pdf".
+  Future<dynamic> postMultipartDocumento(
+    String caminho, {
+    required Uint8List bytes,
+    required String nomeArquivo,
+  }) {
+    return _enviarMultipart(
+      'POST',
+      caminho,
+      campos: const {},
+      nomeCampoArquivo: 'documento_antecedentes',
+      arquivos: [bytes],
+      nomesArquivos: [nomeArquivo],
     );
   }
 

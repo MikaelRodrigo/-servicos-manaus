@@ -48,6 +48,12 @@ dependencies:
   # equivalente Flutter ao cropper.js: tela nativa com zoom/arraste no
   # Android e iOS, implementação em JS (mesmo princípio de canvas) no Web.
   image_cropper: ^8.1.0
+  # Escolher a certidão de antecedentes criminais (migração 18) -- PDF ou
+  # imagem, por isso `image_picker` (só imagem) não serve aqui.
+  # `withData: true` devolve os bytes direto em `PlatformFile.bytes`, sem
+  # precisar de `dart:io File` -- mesmo motivo de `image_picker` já usar
+  # bytes em todo upload deste app: `dart:io` não existe no Flutter Web.
+  file_picker: ^8.1.2
 
 dev_dependencies:
   flutter_test:
